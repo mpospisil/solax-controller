@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Solax.Core/Solax.Core.csproj" />
+    <Project Path="src/Solax.Infrastructure/Solax.Infrastructure.csproj" />
+    <Project Path="src/Solax.Worker/Solax.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Solax.Core.Tests/Solax.Core.Tests.csproj" />
+  </Folder>
+</Solution>
