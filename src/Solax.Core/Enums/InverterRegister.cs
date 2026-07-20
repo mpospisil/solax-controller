@@ -1,11 +1,17 @@
 namespace Solax.Core.Enums;
 
-// TODO: placeholder addresses — verify against the official SolaX X3-HYB-G4 PRO
-// Modbus Power Control Protocol document before connecting to real hardware.
+// Offsets within the Input Register block (Modbus function code 0x04) of the SolaX
+// X1/X3 Hybrid G4 inverter. Verified against "Energy Storage Inverter Modbus TCP&RTU
+// Communication protocols" V3.21 (SolaX Power). Real-time telemetry lives in Input
+// Registers; the similarly-numbered Holding Registers (function code 0x03) are
+// configuration/protection parameters and mean something entirely different.
 public enum InverterRegister : ushort
 {
-    BatterySoc = 0x001C,
-    BatteryPower = 0x0018,
-    PvPower = 0x000A,
-    GridPower = 0x0046,
+    Powerdc1 = 0x000A,
+    Powerdc2 = 0x000B,
+    BatteryPowerCharge1 = 0x0016,
+    BatteryCapacity = 0x001C,
+    GridPowerR = 0x006C,
+    GridPowerS = 0x0070,
+    GridPowerT = 0x0074,
 }

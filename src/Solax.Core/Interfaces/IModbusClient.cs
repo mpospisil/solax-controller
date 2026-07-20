@@ -10,4 +10,9 @@ public interface IModbusClient : IAsyncDisposable
         ushort startAddress,
         ushort numberOfPoints,
         CancellationToken cancellationToken = default);
+
+    Task<ushort[]> ReadInputRegistersAsync(
+        ushort startAddress,
+        ushort numberOfPoints,
+        CancellationToken cancellationToken = default);
 }

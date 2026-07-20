@@ -30,15 +30,45 @@ public sealed class EnergyStateReader : IEnergyStateReader
             await _evChargerClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var batterySoc = await ReadAsync(_inverterClient, InverterRegisterMap.BatterySoc, cancellationToken).ConfigureAwait(false);
-        var batteryPower = await ReadAsync(_inverterClient, InverterRegisterMap.BatteryPower, cancellationToken).ConfigureAwait(false);
-        var pvPower = await ReadAsync(_inverterClient, InverterRegisterMap.PvPower, cancellationToken).ConfigureAwait(false);
-        var gridPower = await ReadAsync(_inverterClient, InverterRegisterMap.GridPower, cancellationToken).ConfigureAwait(false);
-        var evStatus = await ReadAsync(_evChargerClient, EvChargerRegisterMap.Status, cancellationToken).ConfigureAwait(false);
-        var evPower = await ReadAsync(_evChargerClient, EvChargerRegisterMap.Power, cancellationToken).ConfigureAwait(false);
+        var inverterBlock = await ReadInverterTelemetryBlockAsync(cancellationToken).ConfigureAwait(false);
 
-        return EnergyState.FromRawRegisters(DateTimeOffset.UtcNow, batterySoc, batteryPower, pvPower, gridPower, evStatus, evPower);
+        var evStatus = await ReadAsync(_evChargerClient, EvChargerRegisterMap.RunMode, cancellationToken).ConfigureAwait(false);
+        var evPower = await ReadAsync(_evChargerClient, EvChargerRegisterMap.ChargePowerTotal, cancellationToken).ConfigureAwait(false);
+
+        return EnergyState.FromRawRegisters(
+            DateTimeOffset.UtcNow,
+            batterySocRaw: FromBlock(inverterBlock, InverterRegisterMap.BatteryCapacity),
+            batteryPowerRaw: FromBlock(inverterBlock, InverterRegisterMap.BatteryPowerCharge1),
+            pvPowerDc1Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc1),
+            pvPowerDc2Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc2),
+            gridPowerRRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerR),
+            gridPowerSRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerS),
+            gridPowerTRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerT),
+            evChargerStatusRaw: evStatus,
+            evChargerPowerRaw: evPower);
     }
+
+    // Reads the whole telemetry range in one Modbus request (the SolaX protocol requires
+    // >=1 second between separate instructions, so batching beats many small reads).
+    private async Task<ushort[]> ReadInverterTelemetryBlockAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _inverterClient
+                .ReadInputRegistersAsync(
+                    InverterRegisterMap.TelemetryBlockStart,
+                    InverterRegisterMap.TelemetryBlockCount,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Failed to read inverter telemetry block starting at address {InverterRegisterMap.TelemetryBlockStart}.", ex);
+        }
+    }
+
+    private static ushort FromBlock(ushort[] block, RegisterDescriptor register) => block[register.Address];
 
     private static async Task<ushort> ReadAsync(
         IModbusClient client,
@@ -48,7 +78,7 @@ public sealed class EnergyStateReader : IEnergyStateReader
         try
         {
             var values = await client
-                .ReadHoldingRegistersAsync(register.Address, numberOfPoints: 1, cancellationToken)
+                .ReadInputRegistersAsync(register.Address, numberOfPoints: 1, cancellationToken)
                 .ConfigureAwait(false);
             return values[0];
         }

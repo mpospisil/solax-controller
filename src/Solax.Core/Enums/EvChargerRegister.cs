@@ -1,9 +1,11 @@
 namespace Solax.Core.Enums;
 
-// TODO: placeholder addresses — verify against the official SolaX X1/X3-HAC
-// Modbus register map document before connecting to real hardware.
+// Verified against the SolaX EV charger register map used by the
+// wills106/homeassistant-solax-modbus integration (plugin_solax_ev_charger.py),
+// which cross-references SolaX's own "GEN2" EV charger protocol field names.
+// Both are Input Registers (Modbus function code 0x04).
 public enum EvChargerRegister : ushort
 {
-    Status = 0x0000,
-    Power = 0x0002,
+    ChargePowerTotal = 0x000B,
+    RunMode = 0x001D,
 }

@@ -11,14 +11,20 @@ public sealed record EnergyState(
     EvChargerStatus EvChargerStatus,
     double EvChargerPowerWatts)
 {
-    // Power registers are signed 16-bit (negative = discharging/exporting) per the
-    // SolaX Gen4 protocol convention; SOC is an unsigned 0-100 percentage.
+    // Per the SolaX Gen4 protocol: battery/grid power registers are signed 16-bit
+    // (negative = discharging/exporting); Powerdc1/2 (PV) and EV charge power are
+    // unsigned (the HAC charger doesn't support V2G); SOC is an unsigned 0-100
+    // percentage. Total PV power is the sum of both MPPT trackers; total grid power
+    // is the sum of the three phases (X3).
     public static EnergyState FromRawRegisters(
         DateTimeOffset timestamp,
         ushort batterySocRaw,
         ushort batteryPowerRaw,
-        ushort pvPowerRaw,
-        ushort gridPowerRaw,
+        ushort pvPowerDc1Raw,
+        ushort pvPowerDc2Raw,
+        ushort gridPowerRRaw,
+        ushort gridPowerSRaw,
+        ushort gridPowerTRaw,
         ushort evChargerStatusRaw,
         ushort evChargerPowerRaw)
     {
@@ -26,9 +32,9 @@ public sealed record EnergyState(
             timestamp,
             batterySocRaw,
             unchecked((short)batteryPowerRaw),
-            unchecked((short)pvPowerRaw),
-            unchecked((short)gridPowerRaw),
+            pvPowerDc1Raw + pvPowerDc2Raw,
+            unchecked((short)gridPowerRRaw) + unchecked((short)gridPowerSRaw) + unchecked((short)gridPowerTRaw),
             EvChargerStatusMapping.FromRaw(evChargerStatusRaw),
-            unchecked((short)evChargerPowerRaw));
+            evChargerPowerRaw);
     }
 }
