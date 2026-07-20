@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Solax.Worker",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/src/Solax.Worker/bin/Debug/net10.0/Solax.Worker.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/src/Solax.Worker",
+            "console": "internalConsole",
+            "stopAtEntry": false,
+            "env": {
+                "DOTNET_ROOT": "${env:HOME}/.dotnet"
+            },
+            "logging": {
+                "engineLogging": false
+            }
+        },
+        {
+            "name": ".NET Core Attach",
+            "type": "coreclr",
+            "request": "attach"
+        }
+    ]
+}
