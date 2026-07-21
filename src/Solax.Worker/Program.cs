@@ -1,9 +1,11 @@
+using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using Serilog;
 using Solax.Core.Interfaces;
 using Solax.Core.Strategies;
 using Solax.Infrastructure;
 using Solax.Infrastructure.Modbus;
+using Solax.Infrastructure.Solcast;
 using Solax.Worker;
 using Solax.Worker.Configuration;
 
@@ -38,6 +40,31 @@ builder.Services.AddSingleton<IChargingStrategy>(services =>
         options.MinChargingCurrentAmps,
         options.MaxChargingCurrentAmps);
 });
+
+// Solcast solar-forecast integration. The API key is a secret and is not stored in
+// appsettings.json -- supply it via user-secrets (development) or an environment variable
+// (deployment): Solcast:ApiKey / Solcast__ApiKey.
+builder.Services.Configure<SolcastOptions>(builder.Configuration.GetSection(SolcastOptions.SectionName));
+
+builder.Services.AddHttpClient(SolcastForecastService.HttpClientName, (services, client) =>
+{
+    var options = services.GetRequiredService<IOptions<SolcastOptions>>().Value;
+    if (!string.IsNullOrWhiteSpace(options.BaseUrl))
+    {
+        client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
+    }
+
+    if (!string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+    }
+});
+
+// Single instance shared as both the injectable query interface and (via the refresh worker) a
+// service warmed at startup.
+builder.Services.AddSingleton<SolcastForecastService>();
+builder.Services.AddSingleton<ISolarForecastService>(services => services.GetRequiredService<SolcastForecastService>());
+builder.Services.AddHostedService<SolarForecastRefreshWorker>();
 
 builder.Services.AddHostedService<SolaxPollingService>();
 

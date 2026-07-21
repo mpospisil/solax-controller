@@ -9,17 +9,20 @@ public sealed class SolaxPollingService : BackgroundService
 {
     private readonly IEnergyStateReader _energyStateReader;
     private readonly IChargingStrategy _chargingStrategy;
+    private readonly ISolarForecastService _solarForecast;
     private readonly ILogger<SolaxPollingService> _logger;
     private readonly TimeSpan _pollInterval;
 
     public SolaxPollingService(
         IEnergyStateReader energyStateReader,
         IChargingStrategy chargingStrategy,
+        ISolarForecastService solarForecast,
         IOptions<SolaxOptions> options,
         ILogger<SolaxPollingService> logger)
     {
         _energyStateReader = energyStateReader;
         _chargingStrategy = chargingStrategy;
+        _solarForecast = solarForecast;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
@@ -40,6 +43,8 @@ public sealed class SolaxPollingService : BackgroundService
                     state.GridPowerWatts,
                     state.EvChargerStatus,
                     state.EvChargerPowerWatts);
+
+                LogSolarForecast(state.Timestamp);
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {
@@ -74,5 +79,25 @@ public sealed class SolaxPollingService : BackgroundService
                 break;
             }
         }
+    }
+
+    // Logs the solar generation Solcast expects right now (plus today's shape), from the locally
+    // cached forecast. Null until the first successful fetch completes -- log-only for now; the
+    // forecast doesn't yet feed the charging strategy.
+    private void LogSolarForecast(DateTimeOffset now)
+    {
+        var today = _solarForecast.GetForecastForToday();
+        if (today is null)
+        {
+            return;
+        }
+
+        var expectedNow = today.ExpectedPowerWattsAt(now);
+
+        _logger.LogInformation(
+            "Solar forecast: ExpectedNow={ExpectedSolarPowerWatts}W PeakToday={PeakPowerWatts}W ExpectedEnergyToday={ExpectedEnergyWattHours}Wh",
+            expectedNow is null ? "n/a" : $"{expectedNow.Value:F0}",
+            $"{today.PeakPowerWatts:F0}",
+            $"{today.ExpectedEnergyWattHours:F0}");
     }
 }
