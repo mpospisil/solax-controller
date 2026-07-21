@@ -12,12 +12,16 @@ public class SolarSurplusChargingStrategyTests
         minChargingCurrentAmps: 6,
         maxChargingCurrentAmps: 20);
 
-    private static EnergyState StateWith(double evChargerPowerWatts, double gridPowerWatts, double batteryPowerWatts = 0) =>
+    private static EnergyState StateWith(
+        double evChargerPowerWatts,
+        double gridPowerWatts,
+        double batteryPowerWatts = 0,
+        double solarPowerWatts = 0) =>
         new(
             DateTimeOffset.UtcNow,
             BatterySocPercent: 50,
             BatteryPowerWatts: batteryPowerWatts,
-            SolarPowerWatts: 0,
+            SolarPowerWatts: solarPowerWatts,
             GridPowerWatts: gridPowerWatts,
             EvChargerStatus: EvChargerStatus.Charging,
             EvChargerPowerWatts: evChargerPowerWatts);
@@ -107,5 +111,28 @@ public class SolarSurplusChargingStrategyTests
         var result = Strategy.Evaluate(state);
 
         Assert.Equal(900, result.SurplusPowerWatts);
+    }
+
+    [Fact]
+    public void Evaluate_AvailableSolarPower_IsSolarMinusEvAndBatteryCharging()
+    {
+        // 3000W solar, EV drawing 1400W, battery charging 500W: 3000 - 1400 - 500 = 1100W left.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: -1100, batteryPowerWatts: 500, solarPowerWatts: 3000);
+
+        var result = Strategy.Evaluate(state);
+
+        Assert.Equal(1100, result.AvailableSolarPowerWatts);
+    }
+
+    [Fact]
+    public void Evaluate_AvailableSolarPower_BatteryDischargingDoesNotAddBack()
+    {
+        // No solar, EV drawing 1400W, battery discharging 500W to help cover it: discharging
+        // isn't "charging", so it shouldn't offset the result back toward zero.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 900, batteryPowerWatts: -500, solarPowerWatts: 0);
+
+        var result = Strategy.Evaluate(state);
+
+        Assert.Equal(-1400, result.AvailableSolarPowerWatts);
     }
 }

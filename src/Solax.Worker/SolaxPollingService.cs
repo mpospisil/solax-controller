@@ -46,8 +46,9 @@ public sealed class SolaxPollingService : BackgroundService
                     var recommendation = _chargingStrategy.Evaluate(state);
 
                     _logger.LogInformation(
-                        "EV charging surplus: Surplus={SurplusPowerWatts}W RecommendedCurrent={RecommendedChargingCurrentAmps}A Available={IsSurplusAvailable}",
+                        "EV charging surplus: Surplus={SurplusPowerWatts}W AvailableSolar={AvailableSolarPowerWatts}W RecommendedCurrent={RecommendedChargingCurrentAmps}A Available={IsSurplusAvailable}",
                         recommendation.SurplusPowerWatts,
+                        recommendation.AvailableSolarPowerWatts,
                         recommendation.RecommendedChargingCurrentAmps,
                         recommendation.IsSurplusAvailable);
                 }

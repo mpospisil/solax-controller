@@ -39,8 +39,15 @@ public sealed class SolarSurplusChargingStrategy : IChargingStrategy
         // usable surplus -- a trickle current isn't something a charger can actually use.
         var isSurplusAvailable = clampedAmps >= _minChargingCurrentAmps;
 
+        // Current solar production minus what's currently going into charging (EV + battery).
+        // Only the charging component of battery power counts here -- discharging isn't
+        // "charging" and doesn't add back into this figure.
+        var batteryChargingWatts = Math.Max(state.BatteryPowerWatts, 0);
+        var availableSolarPowerWatts = state.SolarPowerWatts - state.EvChargerPowerWatts - batteryChargingWatts;
+
         return new ChargingRecommendation(
             SurplusPowerWatts: surplusWatts,
+            AvailableSolarPowerWatts: availableSolarPowerWatts,
             RecommendedChargingCurrentAmps: isSurplusAvailable ? clampedAmps : 0,
             IsSurplusAvailable: isSurplusAvailable);
     }
