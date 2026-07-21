@@ -12,11 +12,11 @@ public class SolarSurplusChargingStrategyTests
         minChargingCurrentAmps: 6,
         maxChargingCurrentAmps: 20);
 
-    private static EnergyState StateWith(double evChargerPowerWatts, double gridPowerWatts) =>
+    private static EnergyState StateWith(double evChargerPowerWatts, double gridPowerWatts, double batteryPowerWatts = 0) =>
         new(
             DateTimeOffset.UtcNow,
             BatterySocPercent: 50,
-            BatteryPowerWatts: 0,
+            BatteryPowerWatts: batteryPowerWatts,
             PvPowerWatts: 0,
             GridPowerWatts: gridPowerWatts,
             EvChargerStatus: EvChargerStatus.Charging,
@@ -84,5 +84,28 @@ public class SolarSurplusChargingStrategyTests
 
         Assert.True(result.IsSurplusAvailable);
         Assert.Equal(6, result.RecommendedChargingCurrentAmps, precision: 3);
+    }
+
+    [Fact]
+    public void Evaluate_BatteryCharging_CountsTowardSurplus()
+    {
+        // Battery drawing 500W to charge, grid balanced at 0: that 500W could go to the EV instead.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 0, batteryPowerWatts: 500);
+
+        var result = Strategy.Evaluate(state);
+
+        Assert.Equal(1900, result.SurplusPowerWatts);
+    }
+
+    [Fact]
+    public void Evaluate_BatteryDischarging_ReducesSurplus()
+    {
+        // Battery discharging 500W to help cover other loads, grid balanced at 0: that
+        // 500W is already spoken for and isn't free for the EV.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 0, batteryPowerWatts: -500);
+
+        var result = Strategy.Evaluate(state);
+
+        Assert.Equal(900, result.SurplusPowerWatts);
     }
 }

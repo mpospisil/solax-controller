@@ -3,20 +3,19 @@ using Solax.Core.Models;
 
 namespace Solax.Core.Strategies;
 
-// Policy: the battery's current charge/discharge behavior is treated as fixed household
-// consumption/production and is never renegotiated to feed the EV (battery takes priority
-// over EV charging). Under that assumption, "PV minus non-EV home consumption" algebraically
-// reduces to (current EV power) - (current grid power):
+// "Other Loads" here matches the residual load figure shown in the SolaX Cloud app: the
+// portion of household consumption that isn't PV, EV, or battery, derived from the same
+// energy balance the app itself uses (source: PV + Grid; sinks: OtherLoads + EV + Battery,
+// using EnergyState's sign convention -- positive Grid/Battery = importing/charging):
 //
-//   HomeLoad + BatteryNet + EvPower = PV + Grid                    (energy balance)
-//   Surplus  = PV - (HomeLoad + BatteryNet)
-//            = PV - (PV + Grid - EvPower)
-//            = EvPower - Grid
+//   OtherLoads = PV + Grid - EV - Battery
+//   Surplus    = PV - OtherLoads
+//              = PV - (PV + Grid - EV - Battery)
+//              = EV + Battery - Grid
 //
-// This also happens to be the standard "target zero grid exchange" EVSE control law: if
-// Grid is positive (importing), reduce below current EV power; if negative (exporting),
-// increase above it. Battery power never appears explicitly because its current behavior
-// is already folded into Grid.
+// Because OtherLoads nets out both EV and battery as individually-tracked consumers, this
+// surplus is what's available to the EV charger *including* whatever the battery is
+// currently drawing to charge -- i.e. the EV can outbid battery charging for surplus power.
 public sealed class SolarSurplusChargingStrategy : IChargingStrategy
 {
     private readonly double _nominalVoltage;
@@ -32,7 +31,7 @@ public sealed class SolarSurplusChargingStrategy : IChargingStrategy
 
     public ChargingRecommendation Evaluate(EnergyState state)
     {
-        var surplusWatts = state.EvChargerPowerWatts - state.GridPowerWatts;
+        var surplusWatts = state.EvChargerPowerWatts + state.BatteryPowerWatts - state.GridPowerWatts;
         var uncappedAmps = surplusWatts / _nominalVoltage;
         var clampedAmps = Math.Clamp(uncappedAmps, 0, _maxChargingCurrentAmps);
 
