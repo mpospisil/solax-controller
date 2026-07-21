@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Serilog;
 using Solax.Core.Interfaces;
+using Solax.Core.Strategies;
 using Solax.Infrastructure;
 using Solax.Infrastructure.Modbus;
 using Solax.Worker;
@@ -28,6 +29,16 @@ builder.Services.AddKeyedSingleton<IModbusClient>(ModbusClientKeys.EvCharger, (s
 });
 
 builder.Services.AddSingleton<IEnergyStateReader, EnergyStateReader>();
+
+builder.Services.AddSingleton<IChargingStrategy>(services =>
+{
+    var options = services.GetRequiredService<IOptions<SolaxOptions>>().Value.ChargingStrategy;
+    return new SolarSurplusChargingStrategy(
+        options.NominalVoltage,
+        options.MinChargingCurrentAmps,
+        options.MaxChargingCurrentAmps);
+});
+
 builder.Services.AddHostedService<SolaxPollingService>();
 
 var host = builder.Build();
