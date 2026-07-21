@@ -66,7 +66,7 @@ public class EnergyStateTests
     }
 
     [Fact]
-    public void FromRawRegisters_SumsPvPowerAcrossBothMpptTrackers()
+    public void FromRawRegisters_SumsSolarPowerAcrossBothMpptTrackers()
     {
         var state = EnergyState.FromRawRegisters(
             DateTimeOffset.UtcNow,
@@ -80,7 +80,7 @@ public class EnergyStateTests
             evChargerStatusRaw: 0,
             evChargerPowerRaw: 0);
 
-        Assert.Equal(750, state.PvPowerWatts);
+        Assert.Equal(750, state.SolarPowerWatts);
     }
 
     [Fact]

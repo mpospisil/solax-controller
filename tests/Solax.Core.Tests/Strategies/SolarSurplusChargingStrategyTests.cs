@@ -17,7 +17,7 @@ public class SolarSurplusChargingStrategyTests
             DateTimeOffset.UtcNow,
             BatterySocPercent: 50,
             BatteryPowerWatts: batteryPowerWatts,
-            PvPowerWatts: 0,
+            SolarPowerWatts: 0,
             GridPowerWatts: gridPowerWatts,
             EvChargerStatus: EvChargerStatus.Charging,
             EvChargerPowerWatts: evChargerPowerWatts);
