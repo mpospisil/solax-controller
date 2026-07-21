@@ -43,12 +43,13 @@ public sealed class SolaxPollingService : BackgroundService
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {
-                    var recommendation = _chargingStrategy.Evaluate(state);
+                    var recommendation = _chargingStrategy.Evaluate(state, ChargingMode.SolarOnly);
 
                     _logger.LogInformation(
-                        "EV charging surplus: Surplus={SurplusPowerWatts}W AvailableSolar={AvailableSolarPowerWatts}W RecommendedCurrent={RecommendedChargingCurrentAmps}A Available={IsSurplusAvailable}",
+                        "EV charging surplus: Surplus={SurplusPowerWatts}W AvailableSolar={AvailableSolarPowerWatts}W RecommendedPower={RecommendedChargingPowerWatts}W RecommendedCurrent={RecommendedChargingCurrentAmps}A Available={IsSurplusAvailable}",
                         recommendation.SurplusPowerWatts,
-                        recommendation.AvailableSolarPowerWatts,
+                        state.AvailableSolarPowerWatts,
+                        recommendation.RecommendedChargingPowerWatts,
                         recommendation.RecommendedChargingCurrentAmps,
                         recommendation.IsSurplusAvailable);
                 }

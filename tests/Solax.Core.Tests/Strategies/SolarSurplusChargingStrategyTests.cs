@@ -27,38 +27,40 @@ public class SolarSurplusChargingStrategyTests
             EvChargerPowerWatts: evChargerPowerWatts);
 
     [Fact]
-    public void Evaluate_ExportingToGrid_RecommendsMoreThanCurrentEvPower()
+    public void Evaluate_SolarAndBattery_ExportingToGrid_RecommendsMoreThanCurrentEvPower()
     {
         // EV drawing 1400W (~6A), but exporting 1000W to the grid: there's clearly more to give.
         var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: -1000);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(2400, result.SurplusPowerWatts);
         Assert.True(result.IsSurplusAvailable);
         Assert.Equal(2400.0 / 230.0, result.RecommendedChargingCurrentAmps, precision: 3);
+        Assert.Equal(result.RecommendedChargingCurrentAmps * 230, result.RecommendedChargingPowerWatts, precision: 3);
     }
 
     [Fact]
-    public void Evaluate_ImportingMoreThanEvIsUsing_RecommendsNoSurplus()
+    public void Evaluate_SolarAndBattery_ImportingMoreThanEvIsUsing_RecommendsNoSurplus()
     {
         // EV drawing 1400W but the house is importing 2000W overall: EV is oversubscribed.
         var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 2000);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(-600, result.SurplusPowerWatts);
         Assert.False(result.IsSurplusAvailable);
         Assert.Equal(0, result.RecommendedChargingCurrentAmps);
+        Assert.Equal(0, result.RecommendedChargingPowerWatts);
     }
 
     [Fact]
-    public void Evaluate_SurplusBelowMinimumViableCurrent_RecommendsNoSurplus()
+    public void Evaluate_SolarAndBattery_SurplusBelowMinimumViableCurrent_RecommendsNoSurplus()
     {
         // 1A worth of surplus (230W) is below the 6A minimum an EVSE can actually use.
         var state = StateWith(evChargerPowerWatts: 1000, gridPowerWatts: 770);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(230, result.SurplusPowerWatts);
         Assert.False(result.IsSurplusAvailable);
@@ -66,73 +68,92 @@ public class SolarSurplusChargingStrategyTests
     }
 
     [Fact]
-    public void Evaluate_SurplusExceedsChargerMax_ClampsToMaxCurrent()
+    public void Evaluate_SolarAndBattery_SurplusExceedsChargerMax_ClampsToMaxCurrent()
     {
         // Exporting a huge amount: far more than the 20A/4.6kW charger can take.
         var state = StateWith(evChargerPowerWatts: 1000, gridPowerWatts: -9000);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(10000, result.SurplusPowerWatts);
         Assert.True(result.IsSurplusAvailable);
         Assert.Equal(20, result.RecommendedChargingCurrentAmps);
+        Assert.Equal(20 * 230, result.RecommendedChargingPowerWatts);
     }
 
     [Fact]
-    public void Evaluate_ExactlyAtMinimumCurrent_IsAvailable()
+    public void Evaluate_SolarAndBattery_ExactlyAtMinimumCurrent_IsAvailable()
     {
         // Exactly 6A worth of surplus (1380W).
         var state = StateWith(evChargerPowerWatts: 1380, gridPowerWatts: 0);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.True(result.IsSurplusAvailable);
         Assert.Equal(6, result.RecommendedChargingCurrentAmps, precision: 3);
     }
 
     [Fact]
-    public void Evaluate_BatteryCharging_CountsTowardSurplus()
+    public void Evaluate_SolarAndBattery_BatteryCharging_CountsTowardSurplus()
     {
         // Battery drawing 500W to charge, grid balanced at 0: that 500W could go to the EV instead.
         var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 0, batteryPowerWatts: 500);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(1900, result.SurplusPowerWatts);
     }
 
     [Fact]
-    public void Evaluate_BatteryDischarging_ReducesSurplus()
+    public void Evaluate_SolarAndBattery_BatteryDischarging_ReducesSurplus()
     {
         // Battery discharging 500W to help cover other loads, grid balanced at 0: that
         // 500W is already spoken for and isn't free for the EV.
         var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 0, batteryPowerWatts: -500);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarAndBattery);
 
         Assert.Equal(900, result.SurplusPowerWatts);
     }
 
     [Fact]
-    public void Evaluate_AvailableSolarPower_IsSolarMinusEvAndBatteryCharging()
+    public void Evaluate_SolarOnly_IgnoresGrid_TargetsSolarMinusBatteryCharging()
     {
-        // 3000W solar, EV drawing 1400W, battery charging 500W: 3000 - 1400 - 500 = 1100W left.
-        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: -1100, batteryPowerWatts: 500, solarPowerWatts: 3000);
+        // 3000W solar, battery charging 500W, grid heavily importing (e.g. other appliances):
+        // SolarOnly must ignore the grid entirely and target 3000 - 500 = 2500W.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 4000, batteryPowerWatts: 500, solarPowerWatts: 3000);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarOnly);
 
-        Assert.Equal(1100, result.AvailableSolarPowerWatts);
+        Assert.Equal(2500, result.SurplusPowerWatts);
+        Assert.True(result.IsSurplusAvailable);
+        Assert.Equal(2500.0 / 230.0, result.RecommendedChargingCurrentAmps, precision: 3);
+        Assert.Equal(result.RecommendedChargingCurrentAmps * 230, result.RecommendedChargingPowerWatts, precision: 3);
     }
 
     [Fact]
-    public void Evaluate_AvailableSolarPower_BatteryDischargingDoesNotAddBack()
+    public void Evaluate_SolarOnly_BatteryDischarging_DoesNotAddToTarget()
     {
-        // No solar, EV drawing 1400W, battery discharging 500W to help cover it: discharging
-        // isn't "charging", so it shouldn't offset the result back toward zero.
-        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 900, batteryPowerWatts: -500, solarPowerWatts: 0);
+        // Battery discharging never helps the EV in SolarOnly mode -- only Math.Max(battery, 0)
+        // is subtracted, so a discharging battery (-500W) contributes nothing either way.
+        var state = StateWith(evChargerPowerWatts: 1400, gridPowerWatts: 0, batteryPowerWatts: -500, solarPowerWatts: 3000);
 
-        var result = Strategy.Evaluate(state);
+        var result = Strategy.Evaluate(state, ChargingMode.SolarOnly);
 
-        Assert.Equal(-1400, result.AvailableSolarPowerWatts);
+        Assert.Equal(3000, result.SurplusPowerWatts);
+    }
+
+    [Fact]
+    public void Evaluate_SolarOnly_NoSolar_RecommendsNoSurplusRegardlessOfGrid()
+    {
+        // No sun at all: SolarOnly must recommend stopping, even while exporting (e.g. battery
+        // discharging into the grid) -- SolarOnly never uses the grid as a signal.
+        var state = StateWith(evChargerPowerWatts: 0, gridPowerWatts: -2000, batteryPowerWatts: -500, solarPowerWatts: 0);
+
+        var result = Strategy.Evaluate(state, ChargingMode.SolarOnly);
+
+        Assert.Equal(0, result.SurplusPowerWatts);
+        Assert.False(result.IsSurplusAvailable);
+        Assert.Equal(0, result.RecommendedChargingCurrentAmps);
     }
 }

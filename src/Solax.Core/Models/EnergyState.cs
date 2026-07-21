@@ -11,6 +11,14 @@ public sealed record EnergyState(
     EvChargerStatus EvChargerStatus,
     double EvChargerPowerWatts)
 {
+    /// <summary>
+    /// Current solar production minus what's currently going into charging (EV + battery).
+    /// Only the charging component of battery power counts here -- if the battery is
+    /// discharging, that doesn't add back into this figure, since discharging isn't "charging".
+    /// </summary>
+    public double AvailableSolarPowerWatts =>
+        SolarPowerWatts - EvChargerPowerWatts - Math.Max(BatteryPowerWatts, 0);
+
     // Per the SolaX Gen4 protocol: battery/grid power registers are signed 16-bit
     // (negative = discharging/exporting); Powerdc1/2 (solar) and EV charge power are
     // unsigned (the HAC charger doesn't support V2G); SOC is an unsigned 0-100
