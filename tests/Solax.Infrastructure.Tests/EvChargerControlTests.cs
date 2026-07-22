@@ -1,0 +1,79 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Solax.Core.Enums;
+using Solax.Core.Models;
+using Solax.Infrastructure.RegisterMaps;
+
+namespace Solax.Infrastructure.Tests;
+
+public class EvChargerControlTests
+{
+    private static readonly ushort ModeAddress = EvChargerRegisterMap.ChargerUseMode.Address;
+    private static readonly ushort CurrentAddress = EvChargerRegisterMap.ChargeCurrentSetpoint.Address;
+
+    private static EvChargerControl Create(FakeModbusClient client) =>
+        new(client, NullLogger<EvChargerControl>.Instance);
+
+    [Fact]
+    public async Task ReadSettingsAsync_ReadsModeAndCurrentRegisters()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
+        client.SetHolding(CurrentAddress, 8);
+
+        var settings = await Create(client).ReadSettingsAsync();
+
+        Assert.Equal(new EvChargerSettings(EvChargerMode.Eco, 8), settings);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_NoChange_WritesNothing()
+    {
+        var client = new FakeModbusClient();
+        var settings = new EvChargerSettings(EvChargerMode.Fast, 10);
+
+        await Create(client).ApplyAsync(current: settings, target: settings, "no change");
+
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_OnlyModeDiffers_WritesOnlyModeRegister()
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Stop, 10),
+            target: new EvChargerSettings(EvChargerMode.Fast, 10),
+            "mode only");
+
+        Assert.Equal([(ModeAddress, (ushort)EvChargerMode.Fast)], client.Writes);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_OnlyCurrentDiffers_WritesOnlyCurrentRegister()
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Fast, 6),
+            target: new EvChargerSettings(EvChargerMode.Fast, 16),
+            "current only");
+
+        Assert.Equal([(CurrentAddress, (ushort)16)], client.Writes);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_BothDiffer_WritesBothRegisters()
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Stop, 0),
+            target: new EvChargerSettings(EvChargerMode.Fast, 12),
+            "both");
+
+        Assert.Contains((ModeAddress, (ushort)EvChargerMode.Fast), client.Writes);
+        Assert.Contains((CurrentAddress, (ushort)12), client.Writes);
+        Assert.Equal(2, client.Writes.Count);
+    }
+}
