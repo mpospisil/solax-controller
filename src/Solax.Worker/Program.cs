@@ -71,6 +71,25 @@ builder.Services.AddSingleton<SolcastForecastService>();
 builder.Services.AddSingleton<ISolarForecastService>(services => services.GetRequiredService<SolcastForecastService>());
 builder.Services.AddHostedService<SolarForecastRefreshWorker>();
 
+// Forecast-driven EV charge control (issue #10). Disabled by default -- it writes to the charger
+// and the control register addresses must be verified first (see EvChargerRegister).
+builder.Services.Configure<ChargeControlOptions>(builder.Configuration.GetSection(ChargeControlOptions.SectionName));
+
+builder.Services.AddSingleton<IEvChargerControl, EvChargerControl>();
+
+builder.Services.AddSingleton<IChargingController>(services =>
+{
+    var options = services.GetRequiredService<IOptions<ChargeControlOptions>>().Value;
+    return new SolarForecastChargingController(
+        options.NominalVoltage,
+        options.MinChargingCurrentAmps,
+        options.MaxChargingCurrentAmps,
+        options.CurrentStepAmps,
+        options.ResumeHysteresisWatts);
+});
+
+builder.Services.AddSingleton<ChargingControlCoordinator>();
+
 builder.Services.AddHostedService<SolaxPollingService>();
 
 var host = builder.Build();

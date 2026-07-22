@@ -11,6 +11,8 @@ public sealed class SolaxPollingService : BackgroundService
     private readonly IEnergyStateReader _energyStateReader;
     private readonly IChargingStrategy _chargingStrategy;
     private readonly ISolarForecastService _solarForecast;
+    private readonly ChargingControlCoordinator _chargingControl;
+    private readonly bool _chargeControlEnabled;
     private readonly ILogger<SolaxPollingService> _logger;
     private readonly TimeSpan _pollInterval;
 
@@ -18,12 +20,16 @@ public sealed class SolaxPollingService : BackgroundService
         IEnergyStateReader energyStateReader,
         IChargingStrategy chargingStrategy,
         ISolarForecastService solarForecast,
+        ChargingControlCoordinator chargingControl,
         IOptions<SolaxOptions> options,
+        IOptions<ChargeControlOptions> chargeControlOptions,
         ILogger<SolaxPollingService> logger)
     {
         _energyStateReader = energyStateReader;
         _chargingStrategy = chargingStrategy;
         _solarForecast = solarForecast;
+        _chargingControl = chargingControl;
+        _chargeControlEnabled = chargeControlOptions.Value.Enabled;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
@@ -46,6 +52,11 @@ public sealed class SolaxPollingService : BackgroundService
                     state.EvChargerPowerWatts);
 
                 LogSolarActualVsForecast(state);
+
+                if (_chargeControlEnabled)
+                {
+                    await _chargingControl.RunCycleAsync(state, stoppingToken);
+                }
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {

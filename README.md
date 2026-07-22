@@ -140,6 +140,23 @@ The **API key is a secret and must not be committed**. Provide it out-of-band, u
 
 If the API key or resource id is missing, the worker logs a warning and skips forecast refreshes; the rest of the service continues to run. The free Solcast hobbyist tier caps daily API calls, which is why the forecast is cached and refreshed only every 12 hours by default — keep the interval within your plan's quota.
 
+### Forecast-driven charge control (writes to the charger)
+
+When enabled, the worker drives the EV charger from the solar forecast: while a car is connected it fast-charges on predicted surplus (`predictedSolar − OtherLoads`), pauses when the surplus falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+
+```jsonc
+"ChargeControl": {
+  "Enabled": false,             // master switch — OFF by default (see warning)
+  "NominalVoltage": 230,
+  "MinChargingCurrentAmps": 6,
+  "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
+  "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
+  "ResumeHysteresisWatts": 200  // extra surplus needed to (re)start, to avoid flapping
+}
+```
+
+> ⚠️ **This feature writes to your charger's Modbus holding registers.** The control-register addresses in `EvChargerRegister` (`ChargerUseMode`, `ChargeCurrentSetpoint`) and the `EvChargerMode` values are **unverified placeholders**. **Verify them against your specific SolaX charger before setting `Enabled: true`** — writing to a wrong address or with a wrong encoding could misconfigure the charger. It is disabled by default for exactly this reason.
+
 ## License
 
 Licensed under the [MIT License](LICENSE).
