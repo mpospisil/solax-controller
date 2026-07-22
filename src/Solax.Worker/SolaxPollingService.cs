@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Solax.Core.Enums;
 using Solax.Core.Interfaces;
+using Solax.Core.Models;
 using Solax.Worker.Configuration;
 
 namespace Solax.Worker;
@@ -9,17 +10,20 @@ public sealed class SolaxPollingService : BackgroundService
 {
     private readonly IEnergyStateReader _energyStateReader;
     private readonly IChargingStrategy _chargingStrategy;
+    private readonly ISolarForecastService _solarForecast;
     private readonly ILogger<SolaxPollingService> _logger;
     private readonly TimeSpan _pollInterval;
 
     public SolaxPollingService(
         IEnergyStateReader energyStateReader,
         IChargingStrategy chargingStrategy,
+        ISolarForecastService solarForecast,
         IOptions<SolaxOptions> options,
         ILogger<SolaxPollingService> logger)
     {
         _energyStateReader = energyStateReader;
         _chargingStrategy = chargingStrategy;
+        _solarForecast = solarForecast;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
@@ -40,6 +44,8 @@ public sealed class SolaxPollingService : BackgroundService
                     state.GridPowerWatts,
                     state.EvChargerStatus,
                     state.EvChargerPowerWatts);
+
+                LogSolarActualVsForecast(state);
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {
@@ -74,5 +80,28 @@ public sealed class SolaxPollingService : BackgroundService
                 break;
             }
         }
+    }
+
+    // Logs actual solar generation against what Solcast forecast for this moment, plus their
+    // delta (actual minus forecast: positive = producing more than predicted). The forecast comes
+    // from the locally cached forecast and is null until the first successful fetch completes;
+    // the day's overall shape is logged once per refresh inside the forecast service, not here.
+    private void LogSolarActualVsForecast(EnergyState state)
+    {
+        var forecastNow = _solarForecast.GetForecastForToday()?.ExpectedPowerWattsAt(state.Timestamp);
+
+        if (forecastNow is null)
+        {
+            _logger.LogInformation(
+                "Solar: Actual={SolarPowerWatts:F0}W Forecast=n/a Delta=n/a",
+                state.SolarPowerWatts);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Solar: Actual={SolarPowerWatts:F0}W Forecast={ForecastPowerWatts:F0}W Delta={SolarDeltaWatts:F0}W",
+            state.SolarPowerWatts,
+            forecastNow.Value,
+            state.SolarPowerWatts - forecastNow.Value);
     }
 }
