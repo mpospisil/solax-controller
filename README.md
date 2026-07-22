@@ -155,7 +155,9 @@ When enabled, the worker drives the EV charger from the solar forecast: while a 
 }
 ```
 
-> ⚠️ **This feature writes to your charger's Modbus holding registers.** The control-register addresses in `EvChargerRegister` (`ChargerUseMode`, `ChargeCurrentSetpoint`) and the `EvChargerMode` values are **unverified placeholders**. **Verify them against your specific SolaX charger before setting `Enabled: true`** — writing to a wrong address or with a wrong encoding could misconfigure the charger. It is disabled by default for exactly this reason.
+The current setpoint is encoded to the SolaX hardware's requirements automatically: rounded to a whole amp, clamped to the charger's **6–32 A** range, and written with the register's **0.01 A scale** (value = amps × 100). Pausing switches the use-mode to `Stop` and leaves the current setpoint untouched (0 A would be below the hardware minimum).
+
+> ⚠️ **This feature writes to your charger's Modbus holding registers.** The control-register addresses (`ChargerUseMode 0x60D`, `ChargeCurrentSetpoint 0x628`) and `EvChargerMode` values come from the SolaX X1/X3-HAC protocol / the wills106 register map, but **GEN1/GEN2 and firmware differences exist** — GEN1 uses Datahub Charge Current `0x624`, some GEN2 units use EVSE Mode `0x669`. **Verify them against your specific charger before setting `Enabled: true`.** It is disabled by default for exactly this reason.
 
 ## License
 

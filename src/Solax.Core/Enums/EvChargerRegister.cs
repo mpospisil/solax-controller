@@ -9,10 +9,10 @@ public enum EvChargerRegister : ushort
     RunMode = 0x001D,
 
     // --- Control: Holding Registers (function codes 0x03/0x06/0x10), writable. ---
-    // !! UNVERIFIED PLACEHOLDER ADDRESSES. Confirm both the addresses and their value encodings
-    // against your specific charger / the SolaX GEN2 protocol BEFORE enabling control writes
-    // (ChargeControl:Enabled, which defaults to false). Writing to a wrong address or with a wrong
-    // encoding could misconfigure the charger. See issue #10.
-    ChargerUseMode = 0x0060,        // 0=Stop, 1=Fast, 2=Eco, 3=Green (see EvChargerMode)
-    ChargeCurrentSetpoint = 0x0061, // target charging current, in whole amps
+    // Addresses/encodings from the SolaX X1/X3-HAC Modbus protocol and the wills106
+    // homeassistant-solax-modbus map. STILL confirm against your GEN/firmware before enabling
+    // control (ChargeControl:Enabled defaults to false): GEN1 uses Datahub Charge Current 0x624 and
+    // some GEN2 units expose EVSE Mode 0x669 {0:Fast,1:ECO,2:Green} instead of Charger Use Mode.
+    ChargerUseMode = 0x060D,        // 0=Stop, 1=Fast, 2=ECO, 3=Green (see EvChargerMode)
+    ChargeCurrentSetpoint = 0x0628, // target charging current; scale 0.01A (value = amps*100), range 6-32A
 }

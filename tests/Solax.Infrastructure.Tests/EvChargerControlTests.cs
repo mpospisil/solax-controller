@@ -14,11 +14,11 @@ public class EvChargerControlTests
         new(client, NullLogger<EvChargerControl>.Instance);
 
     [Fact]
-    public async Task ReadSettingsAsync_ReadsModeAndCurrentRegisters()
+    public async Task ReadSettingsAsync_DecodesCurrentFrom001AScale()
     {
         var client = new FakeModbusClient();
         client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
-        client.SetHolding(CurrentAddress, 8);
+        client.SetHolding(CurrentAddress, 800); // 0.01A scale -> 8A
 
         var settings = await Create(client).ReadSettingsAsync();
 
@@ -50,7 +50,7 @@ public class EvChargerControlTests
     }
 
     [Fact]
-    public async Task ApplyAsync_OnlyCurrentDiffers_WritesOnlyCurrentRegister()
+    public async Task ApplyAsync_OnlyCurrentDiffers_WritesCurrentEncodedWith001AScale()
     {
         var client = new FakeModbusClient();
 
@@ -59,7 +59,7 @@ public class EvChargerControlTests
             target: new EvChargerSettings(EvChargerMode.Fast, 16),
             "current only");
 
-        Assert.Equal([(CurrentAddress, (ushort)16)], client.Writes);
+        Assert.Equal([(CurrentAddress, (ushort)1600)], client.Writes); // 16A * 100
     }
 
     [Fact]
@@ -68,12 +68,25 @@ public class EvChargerControlTests
         var client = new FakeModbusClient();
 
         await Create(client).ApplyAsync(
-            current: new EvChargerSettings(EvChargerMode.Stop, 0),
+            current: new EvChargerSettings(EvChargerMode.Stop, 6),
             target: new EvChargerSettings(EvChargerMode.Fast, 12),
             "both");
 
         Assert.Contains((ModeAddress, (ushort)EvChargerMode.Fast), client.Writes);
-        Assert.Contains((CurrentAddress, (ushort)12), client.Writes);
+        Assert.Contains((CurrentAddress, (ushort)1200), client.Writes); // 12A * 100
         Assert.Equal(2, client.Writes.Count);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_CurrentAboveHardwareMax_ClampsTo32A()
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Fast, 10),
+            target: new EvChargerSettings(EvChargerMode.Fast, 40), // beyond the 32A hardware max
+            "clamp");
+
+        Assert.Equal([(CurrentAddress, (ushort)3200)], client.Writes); // clamped to 32A -> 3200
     }
 }

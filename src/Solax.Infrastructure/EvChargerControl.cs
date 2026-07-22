@@ -17,6 +17,13 @@ namespace Solax.Infrastructure;
 /// </summary>
 public sealed class EvChargerControl : IEvChargerControl
 {
+    // The SolaX charge-current holding register stores hundredths of an amp: registerValue = amps * 100
+    // (16A -> 1600). Values are constrained to the hardware's 6-32A range on write, no matter what the
+    // caller asks for, so we can never send a current the charger rejects.
+    private const double CurrentRegisterAmpsPerCount = 0.01;
+    private const int HardwareMinCurrentAmps = 6;
+    private const int HardwareMaxCurrentAmps = 32;
+
     private readonly IModbusClient _client;
     private readonly ILogger<EvChargerControl> _logger;
 
@@ -33,9 +40,11 @@ public sealed class EvChargerControl : IEvChargerControl
         await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
         var mode = await ReadRegisterAsync(EvChargerRegisterMap.ChargerUseMode, cancellationToken).ConfigureAwait(false);
-        var current = await ReadRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint, cancellationToken).ConfigureAwait(false);
+        var currentRaw = await ReadRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint, cancellationToken).ConfigureAwait(false);
 
-        return new EvChargerSettings((EvChargerMode)mode, current);
+        // Decode the 0.01A register scale back to whole amps.
+        var currentAmps = (int)Math.Round(currentRaw * CurrentRegisterAmpsPerCount);
+        return new EvChargerSettings((EvChargerMode)mode, currentAmps);
     }
 
     public async Task<EvChargerSettings> ApplyAsync(
@@ -58,11 +67,15 @@ public sealed class EvChargerControl : IEvChargerControl
 
         if (current.ChargeCurrentAmps != target.ChargeCurrentAmps)
         {
+            // Clamp to the hardware's accepted range, then encode with the 0.01A register scale.
+            var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, HardwareMinCurrentAmps, HardwareMaxCurrentAmps);
+            var registerValue = (ushort)Math.Round(clampedAmps / CurrentRegisterAmpsPerCount);
+
             _logger.LogInformation(
-                "Charger current setpoint change: {OldAmps}A -> {NewAmps}A. {Reason}",
-                current.ChargeCurrentAmps, target.ChargeCurrentAmps, reason);
+                "Charger current setpoint change: {OldAmps}A -> {NewAmps}A (register {RegisterValue}). {Reason}",
+                current.ChargeCurrentAmps, clampedAmps, registerValue, reason);
             await _client
-                .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, (ushort)target.ChargeCurrentAmps, cancellationToken)
+                .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, registerValue, cancellationToken)
                 .ConfigureAwait(false);
         }
 

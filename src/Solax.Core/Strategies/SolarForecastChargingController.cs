@@ -86,19 +86,13 @@ public sealed class SolarForecastChargingController : IChargingController
 
         if (availableWatts < startThresholdWatts)
         {
-            return new ChargingControlDecision(
-                ChargingControlAction.Pause,
-                new EvChargerSettings(EvChargerMode.Stop, 0),
-                $"Predicted surplus {availableWatts:F0}W below {(currentlyCharging ? "minimum" : "resume")} threshold {startThresholdWatts:F0}W; pausing.");
+            return Pause(input, $"Predicted surplus {availableWatts:F0}W below {(currentlyCharging ? "minimum" : "resume")} threshold {startThresholdWatts:F0}W; pausing.");
         }
 
         var targetAmps = ToHardwareCurrent(availableWatts);
         if (targetAmps < _minChargingCurrentAmps)
         {
-            return new ChargingControlDecision(
-                ChargingControlAction.Pause,
-                new EvChargerSettings(EvChargerMode.Stop, 0),
-                $"Predicted surplus {availableWatts:F0}W quantises below minimum {_minChargingCurrentAmps}A; pausing.");
+            return Pause(input, $"Predicted surplus {availableWatts:F0}W quantises below minimum {_minChargingCurrentAmps}A; pausing.");
         }
 
         return new ChargingControlDecision(
@@ -106,6 +100,14 @@ public sealed class SolarForecastChargingController : IChargingController
             new EvChargerSettings(EvChargerMode.Fast, targetAmps),
             $"Predicted surplus {availableWatts:F0}W -> fast charge at {targetAmps}A.");
     }
+
+    // Pausing switches the use-mode to Stop but keeps the existing current setpoint: the charge
+    // current register has a 6A hardware minimum, so writing 0 would be an invalid value. Leaving the
+    // current unchanged means only the mode register is actually written.
+    private static ChargingControlDecision Pause(ChargingControlInput input, string reason) =>
+        new(ChargingControlAction.Pause,
+            new EvChargerSettings(EvChargerMode.Stop, input.CurrentSettings.ChargeCurrentAmps),
+            reason);
 
     private bool IsCharging(EvChargerSettings settings) =>
         settings.Mode == EvChargerMode.Fast && settings.ChargeCurrentAmps >= _minChargingCurrentAmps;

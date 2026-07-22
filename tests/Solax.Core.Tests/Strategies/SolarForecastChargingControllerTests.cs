@@ -110,7 +110,8 @@ public class SolarForecastChargingControllerTests
         var result = Controller.Decide(Input(EvChargerStatus.Charging, 1000, 0, Charging10A, hasControl: true));
 
         Assert.Equal(ChargingControlAction.Pause, result.Action);
-        Assert.Equal(new EvChargerSettings(EvChargerMode.Stop, 0), result.TargetSettings);
+        // Pause switches to Stop but keeps the existing current (writing 0 would be below the 6A min).
+        Assert.Equal(new EvChargerSettings(EvChargerMode.Stop, 10), result.TargetSettings);
     }
 
     [Fact]
