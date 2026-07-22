@@ -27,14 +27,35 @@ public class EnergyStateTests
     }
 
     [Theory]
-    [InlineData((ushort)1500, 1500)] // charging / importing
-    [InlineData(unchecked((ushort)(short)-1500), -1500)] // discharging / exporting
-    public void FromRawRegisters_MapsSignedPowerRegisters(ushort raw, double expectedWatts)
+    [InlineData((ushort)1500, 1500)] // charging
+    [InlineData(unchecked((ushort)(short)-1500), -1500)] // discharging
+    public void FromRawRegisters_MapsSignedBatteryPower_PositiveIsCharging(ushort raw, double expectedWatts)
     {
         var state = EnergyState.FromRawRegisters(
             DateTimeOffset.UtcNow,
             batterySocRaw: 0,
             batteryPowerRaw: raw,
+            pvPowerDc1Raw: 0,
+            pvPowerDc2Raw: 0,
+            gridPowerRRaw: 0,
+            gridPowerSRaw: 0,
+            gridPowerTRaw: 0,
+            evChargerStatusRaw: 0,
+            evChargerPowerRaw: 0);
+
+        Assert.Equal(expectedWatts, state.BatteryPowerWatts);
+    }
+
+    [Theory]
+    // SolaX reports the grid meter as positive = export; this model negates it to positive = import.
+    [InlineData((ushort)1500, -1500)] // raw +1500 export -> -1500 (exporting)
+    [InlineData(unchecked((ushort)(short)-1500), 1500)] // raw -1500 import -> +1500 (importing)
+    public void FromRawRegisters_NegatesGridPower_PositiveIsImporting(ushort raw, double expectedWatts)
+    {
+        var state = EnergyState.FromRawRegisters(
+            DateTimeOffset.UtcNow,
+            batterySocRaw: 0,
+            batteryPowerRaw: 0,
             pvPowerDc1Raw: 0,
             pvPowerDc2Raw: 0,
             gridPowerRRaw: raw,
@@ -43,7 +64,6 @@ public class EnergyStateTests
             evChargerStatusRaw: 0,
             evChargerPowerRaw: 0);
 
-        Assert.Equal(expectedWatts, state.BatteryPowerWatts);
         Assert.Equal(expectedWatts, state.GridPowerWatts);
     }
 
@@ -84,7 +104,7 @@ public class EnergyStateTests
     }
 
     [Fact]
-    public void FromRawRegisters_SumsGridPowerAcrossAllThreePhases()
+    public void FromRawRegisters_SumsGridPowerAcrossAllThreePhases_ThenNegates()
     {
         var state = EnergyState.FromRawRegisters(
             DateTimeOffset.UtcNow,
@@ -98,7 +118,25 @@ public class EnergyStateTests
             evChargerStatusRaw: 0,
             evChargerPowerRaw: 0);
 
-        Assert.Equal(600, state.GridPowerWatts);
+        // Raw phases sum to +600 (net export); negated to the import-positive convention -> -600.
+        Assert.Equal(-600, state.GridPowerWatts);
+    }
+
+    [Fact]
+    public void OtherLoadsPowerWatts_IsHouseholdBaseLoad_ExcludingPvEvAndBattery()
+    {
+        // Solar 7267W, exporting 7016W to grid (import convention -> Grid = -7016), battery idle,
+        // no EV: household base load = 7267 - 7016 = 251W (the residual seen in real telemetry).
+        var state = new EnergyState(
+            DateTimeOffset.UtcNow,
+            BatterySocPercent: 100,
+            BatteryPowerWatts: 0,
+            SolarPowerWatts: 7267,
+            GridPowerWatts: -7016,
+            EvChargerStatus: EvChargerStatus.Available,
+            EvChargerPowerWatts: 0);
+
+        Assert.Equal(251, state.OtherLoadsPowerWatts);
     }
 
     [Fact]
