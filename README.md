@@ -116,19 +116,26 @@ The worker fetches a solar-generation forecast for your site from [Solcast](http
 }
 ```
 
-The **API key is a secret and must not be committed**. Provide it out-of-band:
+The **API key is a secret and must not be committed**. Provide it out-of-band, using whichever of these fits how you run the app:
 
-- **Development** — [.NET user-secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets) (the `Solax.Worker` project already has a `UserSecretsId`):
+- **`.env` file (recommended for local dev)** — copy `.env.example` to `.env` (which is gitignored) in the repo root and set your key. On startup the worker loads the nearest `.env` into the process environment, so it works both from `dotnet run` **and** the VS Code debugger without any shell setup:
+
+  ```bash
+  cp .env.example .env
+  # then edit .env:  Solcast__ApiKey=<your-api-key>
+  ```
+
+- **Environment variable** — set it in your shell/service manager (double underscore separates config sections). A real environment variable always takes precedence over `.env`:
+
+  ```bash
+  export Solcast__ApiKey="<your-api-key>"
+  ```
+
+- **.NET user-secrets** — the `Solax.Worker` project has a `UserSecretsId`, so this works in Development too:
 
   ```bash
   cd src/Solax.Worker
   dotnet user-secrets set "Solcast:ApiKey" "<your-api-key>"
-  ```
-
-- **Deployment** — an environment variable (double underscore separates config sections):
-
-  ```bash
-  export Solcast__ApiKey="<your-api-key>"
   ```
 
 If the API key or resource id is missing, the worker logs a warning and skips forecast refreshes; the rest of the service continues to run. The free Solcast hobbyist tier caps daily API calls, which is why the forecast is cached and refreshed only every 12 hours by default — keep the interval within your plan's quota.

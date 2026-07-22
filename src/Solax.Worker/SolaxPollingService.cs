@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Solax.Core.Enums;
 using Solax.Core.Interfaces;
+using Solax.Core.Models;
 using Solax.Worker.Configuration;
 
 namespace Solax.Worker;
@@ -44,7 +45,7 @@ public sealed class SolaxPollingService : BackgroundService
                     state.EvChargerStatus,
                     state.EvChargerPowerWatts);
 
-                LogSolarForecast(state.Timestamp);
+                LogSolarActualVsForecast(state);
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {
@@ -81,23 +82,26 @@ public sealed class SolaxPollingService : BackgroundService
         }
     }
 
-    // Logs the solar generation Solcast expects right now (plus today's shape), from the locally
-    // cached forecast. Null until the first successful fetch completes -- log-only for now; the
-    // forecast doesn't yet feed the charging strategy.
-    private void LogSolarForecast(DateTimeOffset now)
+    // Logs actual solar generation against what Solcast forecast for this moment, plus their
+    // delta (actual minus forecast: positive = producing more than predicted). The forecast comes
+    // from the locally cached forecast and is null until the first successful fetch completes;
+    // the day's overall shape is logged once per refresh inside the forecast service, not here.
+    private void LogSolarActualVsForecast(EnergyState state)
     {
-        var today = _solarForecast.GetForecastForToday();
-        if (today is null)
+        var forecastNow = _solarForecast.GetForecastForToday()?.ExpectedPowerWattsAt(state.Timestamp);
+
+        if (forecastNow is null)
         {
+            _logger.LogInformation(
+                "Solar: Actual={SolarPowerWatts:F0}W Forecast=n/a Delta=n/a",
+                state.SolarPowerWatts);
             return;
         }
 
-        var expectedNow = today.ExpectedPowerWattsAt(now);
-
         _logger.LogInformation(
-            "Solar forecast: ExpectedNow={ExpectedSolarPowerWatts}W PeakToday={PeakPowerWatts}W ExpectedEnergyToday={ExpectedEnergyWattHours}Wh",
-            expectedNow is null ? "n/a" : $"{expectedNow.Value:F0}",
-            $"{today.PeakPowerWatts:F0}",
-            $"{today.ExpectedEnergyWattHours:F0}");
+            "Solar: Actual={SolarPowerWatts:F0}W Forecast={ForecastPowerWatts:F0}W Delta={SolarDeltaWatts:F0}W",
+            state.SolarPowerWatts,
+            forecastNow.Value,
+            state.SolarPowerWatts - forecastNow.Value);
     }
 }

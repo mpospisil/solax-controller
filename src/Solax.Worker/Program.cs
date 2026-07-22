@@ -9,6 +9,11 @@ using Solax.Infrastructure.Solcast;
 using Solax.Worker;
 using Solax.Worker.Configuration;
 
+// Load secrets (e.g. Solcast__ApiKey) from an untracked .env file into the process environment
+// before configuration is built, so they reach the app whether it's started via `dotnet run` or
+// the VS Code debugger -- without living in any committed file. Real env vars still take priority.
+DotEnv.Load(Directory.GetCurrentDirectory());
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Logging.ClearProviders();

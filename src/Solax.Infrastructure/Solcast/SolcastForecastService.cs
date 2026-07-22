@@ -92,11 +92,14 @@ public sealed class SolcastForecastService : ISolarForecastService
 
             _cached = new SolarForecast(_timeProvider.GetUtcNow(), periods);
 
+            // The day's overall shape is logged here, once per refresh -- the polling loop only
+            // logs the live actual-vs-forecast comparison, not this summary.
+            var today = GetForecastForToday();
             _logger.LogInformation(
                 "Refreshed Solcast forecast: {PeriodCount} periods, PeakToday={PeakPowerWatts:F0}W, EnergyToday={EnergyWattHours:F0}Wh.",
                 periods.Count,
-                GetForecastForToday()?.PeakPowerWatts ?? 0,
-                GetForecastForToday()?.ExpectedEnergyWattHours ?? 0);
+                today?.PeakPowerWatts ?? 0,
+                today?.ExpectedEnergyWattHours ?? 0);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
