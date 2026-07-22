@@ -9,7 +9,11 @@ public sealed record EnergyState(
     double SolarPowerWatts,
     double GridPowerWatts,
     EvChargerStatus EvChargerStatus,
-    double EvChargerPowerWatts)
+    double EvChargerPowerWatts,
+    // The charger's work/use mode (Fast/ECO/Green/Stop), or null when it couldn't be read (the
+    // holding register isn't available on every charger/firmware). Doesn't come from the inverter
+    // telemetry block, so it's attached after FromRawRegisters rather than being a raw parameter.
+    EvChargerMode? ChargeMode = null)
 {
     /// <summary>
     /// Current solar production minus what's currently going into charging (EV + battery).

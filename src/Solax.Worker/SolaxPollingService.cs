@@ -43,12 +43,13 @@ public sealed class SolaxPollingService : BackgroundService
                 var state = await _energyStateReader.ReadAsync(stoppingToken);
 
                 _logger.LogInformation(
-                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvPower={EvChargerPowerWatts}W",
+                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvMode={EvChargeMode} EvPower={EvChargerPowerWatts}W",
                     state.BatterySocPercent,
                     state.BatteryPowerWatts,
                     state.SolarPowerWatts,
                     state.GridPowerWatts,
                     state.EvChargerStatus,
+                    (object?)state.ChargeMode ?? "n/a",
                     state.EvChargerPowerWatts);
 
                 LogSolarActualVsForecast(state);
