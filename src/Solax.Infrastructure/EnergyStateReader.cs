@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Solax.Core.Enums;
 using Solax.Core.Interfaces;
 using Solax.Core.Models;
 using Solax.Infrastructure.RegisterMaps;
@@ -34,6 +35,7 @@ public sealed class EnergyStateReader : IEnergyStateReader
 
         var evStatus = await ReadAsync(_evChargerClient, EvChargerRegisterMap.RunMode, cancellationToken).ConfigureAwait(false);
         var evPower = await ReadAsync(_evChargerClient, EvChargerRegisterMap.ChargePowerTotal, cancellationToken).ConfigureAwait(false);
+        var evChargeMode = await TryReadChargeModeAsync(cancellationToken).ConfigureAwait(false);
 
         return EnergyState.FromRawRegisters(
             DateTimeOffset.UtcNow,
@@ -45,7 +47,26 @@ public sealed class EnergyStateReader : IEnergyStateReader
             gridPowerSRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerS),
             gridPowerTRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerT),
             evChargerStatusRaw: evStatus,
-            evChargerPowerRaw: evPower);
+            evChargerPowerRaw: evPower) with { ChargeMode = evChargeMode };
+    }
+
+    // Reads the charger's work/use mode (a holding register). Best-effort: this register isn't
+    // available on every charger/firmware, so a failed read yields null rather than failing the
+    // whole telemetry poll. A value outside the known enum range is also treated as unknown.
+    private async Task<EvChargerMode?> TryReadChargeModeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var values = await _evChargerClient
+                .ReadHoldingRegistersAsync(EvChargerRegisterMap.ChargerUseMode.Address, numberOfPoints: 1, cancellationToken)
+                .ConfigureAwait(false);
+            var raw = values[0];
+            return raw <= (ushort)EvChargerMode.Green ? (EvChargerMode)raw : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     // Reads the whole telemetry range in one Modbus request (the SolaX protocol requires

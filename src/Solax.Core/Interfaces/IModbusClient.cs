@@ -15,4 +15,14 @@ public interface IModbusClient : IAsyncDisposable
         ushort startAddress,
         ushort numberOfPoints,
         CancellationToken cancellationToken = default);
+
+    Task WriteSingleRegisterAsync(
+        ushort address,
+        ushort value,
+        CancellationToken cancellationToken = default);
+
+    Task WriteMultipleRegistersAsync(
+        ushort startAddress,
+        ushort[] values,
+        CancellationToken cancellationToken = default);
 }

@@ -11,6 +11,9 @@ public sealed class SolaxPollingService : BackgroundService
     private readonly IEnergyStateReader _energyStateReader;
     private readonly IChargingStrategy _chargingStrategy;
     private readonly ISolarForecastService _solarForecast;
+    private readonly ChargingControlCoordinator _chargingControl;
+    private readonly bool _chargeControlEnabled;
+    private readonly bool _chargeControlDryRun;
     private readonly ILogger<SolaxPollingService> _logger;
     private readonly TimeSpan _pollInterval;
 
@@ -18,18 +21,30 @@ public sealed class SolaxPollingService : BackgroundService
         IEnergyStateReader energyStateReader,
         IChargingStrategy chargingStrategy,
         ISolarForecastService solarForecast,
+        ChargingControlCoordinator chargingControl,
         IOptions<SolaxOptions> options,
+        IOptions<ChargeControlOptions> chargeControlOptions,
         ILogger<SolaxPollingService> logger)
     {
         _energyStateReader = energyStateReader;
         _chargingStrategy = chargingStrategy;
         _solarForecast = solarForecast;
+        _chargingControl = chargingControl;
+        _chargeControlEnabled = chargeControlOptions.Value.Enabled;
+        _chargeControlDryRun = chargeControlOptions.Value.DryRun;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_chargeControlEnabled)
+        {
+            _logger.LogInformation(
+                "Forecast-driven charge control is ENABLED ({Mode}).",
+                _chargeControlDryRun ? "DRY RUN — no writes to the charger" : "live — writing to the charger");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -37,15 +52,21 @@ public sealed class SolaxPollingService : BackgroundService
                 var state = await _energyStateReader.ReadAsync(stoppingToken);
 
                 _logger.LogInformation(
-                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvPower={EvChargerPowerWatts}W",
+                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvMode={EvChargeMode} EvPower={EvChargerPowerWatts}W",
                     state.BatterySocPercent,
                     state.BatteryPowerWatts,
                     state.SolarPowerWatts,
                     state.GridPowerWatts,
                     state.EvChargerStatus,
+                    (object?)state.ChargeMode ?? "n/a",
                     state.EvChargerPowerWatts);
 
                 LogSolarActualVsForecast(state);
+
+                if (_chargeControlEnabled)
+                {
+                    await _chargingControl.RunCycleAsync(state, stoppingToken);
+                }
 
                 if (state.EvChargerStatus == EvChargerStatus.Charging)
                 {

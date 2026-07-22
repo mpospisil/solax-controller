@@ -77,6 +77,34 @@ public sealed class ModbusTcpClient : IModbusClient
         return await _master.ReadInputRegistersAsync(_device.UnitId, startAddress, numberOfPoints).ConfigureAwait(false);
     }
 
+    public async Task WriteSingleRegisterAsync(
+        ushort address,
+        ushort value,
+        CancellationToken cancellationToken = default)
+    {
+        if (_master is null || !IsConnected)
+        {
+            throw new InvalidOperationException("Modbus client is not connected. Call ConnectAsync first.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await _master.WriteSingleRegisterAsync(_device.UnitId, address, value).ConfigureAwait(false);
+    }
+
+    public async Task WriteMultipleRegistersAsync(
+        ushort startAddress,
+        ushort[] values,
+        CancellationToken cancellationToken = default)
+    {
+        if (_master is null || !IsConnected)
+        {
+            throw new InvalidOperationException("Modbus client is not connected. Call ConnectAsync first.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await _master.WriteMultipleRegistersAsync(_device.UnitId, startAddress, values).ConfigureAwait(false);
+    }
+
     public ValueTask DisposeAsync()
     {
         _master?.Dispose();

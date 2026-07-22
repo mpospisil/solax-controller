@@ -1,0 +1,51 @@
+using Solax.Core.Enums;
+using Solax.Core.Interfaces;
+using Solax.Core.Models;
+
+namespace Solax.Worker.Tests;
+
+/// <summary>Records applied settings and reflects them back as the new "current", like real hardware.</summary>
+internal sealed class FakeEvChargerControl : IEvChargerControl
+{
+    public EvChargerSettings CurrentSettings { get; set; } = new(EvChargerMode.Stop, 0);
+
+    public List<(EvChargerSettings Current, EvChargerSettings Target, string Reason)> Applied { get; } = [];
+
+    public Task<EvChargerSettings> ReadSettingsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(CurrentSettings);
+
+    public Task<EvChargerSettings> ApplyAsync(
+        EvChargerSettings current,
+        EvChargerSettings target,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        Applied.Add((current, target, reason));
+        CurrentSettings = target;
+        return Task.FromResult(target);
+    }
+}
+
+/// <summary>Returns a canned decision and captures the last input the coordinator built.</summary>
+internal sealed class StubChargingController : IChargingController
+{
+    public ChargingControlDecision NextDecision { get; set; } =
+        new(ChargingControlAction.None, null, "stub");
+
+    public ChargingControlInput? LastInput { get; private set; }
+
+    public ChargingControlDecision Decide(ChargingControlInput input)
+    {
+        LastInput = input;
+        return NextDecision;
+    }
+}
+
+internal sealed class FakeSolarForecastService : ISolarForecastService
+{
+    public SolarForecast? Today { get; set; }
+
+    public SolarForecast? GetForecastForToday() => Today;
+
+    public SolarForecast? GetForecast(DateTimeOffset from, DateTimeOffset to) => Today;
+}

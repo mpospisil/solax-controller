@@ -140,6 +140,28 @@ The **API key is a secret and must not be committed**. Provide it out-of-band, u
 
 If the API key or resource id is missing, the worker logs a warning and skips forecast refreshes; the rest of the service continues to run. The free Solcast hobbyist tier caps daily API calls, which is why the forecast is cached and refreshed only every 12 hours by default — keep the interval within your plan's quota.
 
+### Forecast-driven charge control (writes to the charger)
+
+When enabled, the worker drives the EV charger from the solar forecast: while a car is connected it fast-charges on predicted surplus (`predictedSolar − OtherLoads`), pauses when the surplus falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+
+```jsonc
+"ChargeControl": {
+  "Enabled": false,             // master switch — OFF by default (see warning)
+  "DryRun": false,              // when Enabled: log intended writes but don't write (validation)
+  "NominalVoltage": 230,
+  "MinChargingCurrentAmps": 6,
+  "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
+  "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
+  "ResumeHysteresisWatts": 200  // extra surplus needed to (re)start, to avoid flapping
+}
+```
+
+The current setpoint is encoded to the SolaX hardware's requirements automatically: rounded to a whole amp, clamped to the charger's **6–32 A** range, and written with the register's **0.01 A scale** (value = amps × 100). Pausing switches the use-mode to `Stop` and leaves the current setpoint untouched (0 A would be below the hardware minimum).
+
+**Validate first with `DryRun`.** Set `Enabled: true` and `DryRun: true` to run the full control loop and log exactly what it *would* write — e.g. `[DRY RUN] would set charger current setpoint: 6A -> 16A (register 1600)` — without touching the charger. This is the safe way to confirm the register values against your device before allowing real writes.
+
+> ⚠️ **This feature writes to your charger's Modbus holding registers.** The control-register addresses (`ChargerUseMode 0x60D`, `ChargeCurrentSetpoint 0x628`) and `EvChargerMode` values come from the SolaX X1/X3-HAC protocol / the wills106 register map, but **GEN1/GEN2 and firmware differences exist** — GEN1 uses Datahub Charge Current `0x624`, some GEN2 units use EVSE Mode `0x669`. **Verify them against your specific charger before setting `Enabled: true`.** It is disabled by default for exactly this reason.
+
 ## License
 
 Licensed under the [MIT License](LICENSE).

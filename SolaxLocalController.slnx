@@ -6,5 +6,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Solax.Core.Tests/Solax.Core.Tests.csproj" />
+    <Project Path="tests/Solax.Infrastructure.Tests/Solax.Infrastructure.Tests.csproj" />
+    <Project Path="tests/Solax.Worker.Tests/Solax.Worker.Tests.csproj" />
   </Folder>
 </Solution>
