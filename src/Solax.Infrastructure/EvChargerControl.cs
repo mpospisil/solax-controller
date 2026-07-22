@@ -11,9 +11,12 @@ namespace Solax.Infrastructure;
 /// <see cref="IEvChargerControl"/> over Modbus. Reads the charger's use-mode and current-setpoint
 /// holding registers, and writes only the ones that actually change, logging each change.
 ///
-/// !! The control register addresses (see <see cref="EvChargerRegisterMap"/> /
-/// <see cref="EvChargerRegister"/>) are UNVERIFIED placeholders. Verify them against your hardware
-/// before enabling control. Control is disabled by default.
+/// In dry-run mode nothing is written: each intended change is logged (including the encoded
+/// register value) and an internal simulated state stands in for the hardware, so the logs read
+/// like a real run (change once, then quiet) without touching the charger.
+///
+/// !! The control register addresses come from the SolaX X1/X3-HAC protocol but still depend on
+/// your GEN/firmware -- verify before enabling real writes. Control is disabled by default.
 /// </summary>
 public sealed class EvChargerControl : IEvChargerControl
 {
@@ -26,17 +29,29 @@ public sealed class EvChargerControl : IEvChargerControl
 
     private readonly IModbusClient _client;
     private readonly ILogger<EvChargerControl> _logger;
+    private readonly bool _dryRun;
+
+    // Dry-run only: the settings the charger "would" now have, so reads reflect prior simulated
+    // writes and change-detection behaves like a real run instead of re-logging every poll.
+    private EvChargerSettings? _simulated;
 
     public EvChargerControl(
         [FromKeyedServices(ModbusClientKeys.EvCharger)] IModbusClient client,
-        ILogger<EvChargerControl> logger)
+        ILogger<EvChargerControl> logger,
+        bool dryRun = false)
     {
         _client = client;
         _logger = logger;
+        _dryRun = dryRun;
     }
 
     public async Task<EvChargerSettings> ReadSettingsAsync(CancellationToken cancellationToken = default)
     {
+        if (_dryRun && _simulated is not null)
+        {
+            return _simulated;
+        }
+
         await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
         var mode = await ReadRegisterAsync(EvChargerRegisterMap.ChargerUseMode, cancellationToken).ConfigureAwait(false);
@@ -53,16 +68,25 @@ public sealed class EvChargerControl : IEvChargerControl
         string reason,
         CancellationToken cancellationToken = default)
     {
-        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        if (!_dryRun)
+        {
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var prefix = _dryRun ? "[DRY RUN] would set " : "";
 
         if (current.Mode != target.Mode)
         {
             _logger.LogInformation(
-                "Charger use-mode change: {OldMode} -> {NewMode}. {Reason}",
-                current.Mode, target.Mode, reason);
-            await _client
-                .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargerUseMode.Address, (ushort)target.Mode, cancellationToken)
-                .ConfigureAwait(false);
+                "{Prefix}charger use-mode: {OldMode} -> {NewMode}. {Reason}",
+                prefix, current.Mode, target.Mode, reason);
+
+            if (!_dryRun)
+            {
+                await _client
+                    .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargerUseMode.Address, (ushort)target.Mode, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         if (current.ChargeCurrentAmps != target.ChargeCurrentAmps)
@@ -72,11 +96,20 @@ public sealed class EvChargerControl : IEvChargerControl
             var registerValue = (ushort)Math.Round(clampedAmps / CurrentRegisterAmpsPerCount);
 
             _logger.LogInformation(
-                "Charger current setpoint change: {OldAmps}A -> {NewAmps}A (register {RegisterValue}). {Reason}",
-                current.ChargeCurrentAmps, clampedAmps, registerValue, reason);
-            await _client
-                .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, registerValue, cancellationToken)
-                .ConfigureAwait(false);
+                "{Prefix}charger current setpoint: {OldAmps}A -> {NewAmps}A (register {RegisterValue}). {Reason}",
+                prefix, current.ChargeCurrentAmps, clampedAmps, registerValue, reason);
+
+            if (!_dryRun)
+            {
+                await _client
+                    .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, registerValue, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        if (_dryRun)
+        {
+            _simulated = target;
         }
 
         return target;

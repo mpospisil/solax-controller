@@ -75,7 +75,13 @@ builder.Services.AddHostedService<SolarForecastRefreshWorker>();
 // and the control register addresses must be verified first (see EvChargerRegister).
 builder.Services.Configure<ChargeControlOptions>(builder.Configuration.GetSection(ChargeControlOptions.SectionName));
 
-builder.Services.AddSingleton<IEvChargerControl, EvChargerControl>();
+builder.Services.AddSingleton<IEvChargerControl>(services =>
+{
+    var client = services.GetRequiredKeyedService<IModbusClient>(ModbusClientKeys.EvCharger);
+    var logger = services.GetRequiredService<ILogger<EvChargerControl>>();
+    var options = services.GetRequiredService<IOptions<ChargeControlOptions>>().Value;
+    return new EvChargerControl(client, logger, dryRun: options.DryRun);
+});
 
 builder.Services.AddSingleton<IChargingController>(services =>
 {

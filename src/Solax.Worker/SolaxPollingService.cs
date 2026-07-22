@@ -13,6 +13,7 @@ public sealed class SolaxPollingService : BackgroundService
     private readonly ISolarForecastService _solarForecast;
     private readonly ChargingControlCoordinator _chargingControl;
     private readonly bool _chargeControlEnabled;
+    private readonly bool _chargeControlDryRun;
     private readonly ILogger<SolaxPollingService> _logger;
     private readonly TimeSpan _pollInterval;
 
@@ -30,12 +31,20 @@ public sealed class SolaxPollingService : BackgroundService
         _solarForecast = solarForecast;
         _chargingControl = chargingControl;
         _chargeControlEnabled = chargeControlOptions.Value.Enabled;
+        _chargeControlDryRun = chargeControlOptions.Value.DryRun;
         _logger = logger;
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_chargeControlEnabled)
+        {
+            _logger.LogInformation(
+                "Forecast-driven charge control is ENABLED ({Mode}).",
+                _chargeControlDryRun ? "DRY RUN — no writes to the charger" : "live — writing to the charger");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try

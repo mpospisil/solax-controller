@@ -13,6 +13,9 @@ public class EvChargerControlTests
     private static EvChargerControl Create(FakeModbusClient client) =>
         new(client, NullLogger<EvChargerControl>.Instance);
 
+    private static EvChargerControl CreateDryRun(FakeModbusClient client) =>
+        new(client, NullLogger<EvChargerControl>.Instance, dryRun: true);
+
     [Fact]
     public async Task ReadSettingsAsync_DecodesCurrentFrom001AScale()
     {
@@ -88,5 +91,34 @@ public class EvChargerControlTests
             "clamp");
 
         Assert.Equal([(CurrentAddress, (ushort)3200)], client.Writes); // clamped to 32A -> 3200
+    }
+
+    [Fact]
+    public async Task DryRun_ApplyAsync_WritesNothingToHardware()
+    {
+        var client = new FakeModbusClient();
+
+        await CreateDryRun(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Stop, 6),
+            target: new EvChargerSettings(EvChargerMode.Fast, 16),
+            "dry run");
+
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
+    public async Task DryRun_ReadSettings_ReflectsPriorSimulatedApply()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Green);
+        client.SetHolding(CurrentAddress, 600); // 6A
+        var control = CreateDryRun(client);
+
+        var target = new EvChargerSettings(EvChargerMode.Fast, 16);
+        await control.ApplyAsync(await control.ReadSettingsAsync(), target, "dry run");
+
+        // No hardware write, but the next read reflects the simulated state.
+        Assert.Empty(client.Writes);
+        Assert.Equal(target, await control.ReadSettingsAsync());
     }
 }

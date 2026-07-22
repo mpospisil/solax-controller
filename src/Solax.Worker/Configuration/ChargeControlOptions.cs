@@ -12,6 +12,13 @@ public sealed class ChargeControlOptions
     /// <summary>Master on/off switch. Off by default (writes to hardware — verify registers first).</summary>
     public bool Enabled { get; init; }
 
+    /// <summary>
+    /// When true (and <see cref="Enabled"/>), the control loop runs and logs exactly what it would
+    /// write (mode and the encoded current-register value) but performs no Modbus writes. Use it to
+    /// validate the setpoints against your charger before letting it write for real.
+    /// </summary>
+    public bool DryRun { get; init; }
+
     /// <summary>Voltage used to convert between watts and the charger's amp setpoint.</summary>
     public double NominalVoltage { get; init; } = 230;
 
