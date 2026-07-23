@@ -6,8 +6,7 @@ namespace Solax.Core.Models;
 /// The input a <see cref="Interfaces.IChargingController"/> needs to decide what to do with the
 /// charger this cycle.
 /// </summary>
-/// <param name="State">The latest energy snapshot (carries charger status and the Other Loads residual).</param>
-/// <param name="PredictedSolarPowerWatts">Solcast's forecast PV power for this instant, in watts.</param>
+/// <param name="State">The latest energy snapshot (carries charger status, SOC, and the Other Loads residual).</param>
 /// <param name="CurrentSettings">The charger's currently active settings, read from the hardware.</param>
 /// <param name="HasControl">
 /// Whether the orchestrator currently holds control (i.e. has backed up the original settings and
@@ -15,7 +14,6 @@ namespace Solax.Core.Models;
 /// </param>
 public sealed record ChargingControlInput(
     EnergyState State,
-    double PredictedSolarPowerWatts,
     EvChargerSettings CurrentSettings,
     bool HasControl);
 

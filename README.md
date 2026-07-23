@@ -140,21 +140,28 @@ The **API key is a secret and must not be committed**. Provide it out-of-band, u
 
 If the API key or resource id is missing, the worker logs a warning and skips forecast refreshes; the rest of the service continues to run. The free Solcast hobbyist tier caps daily API calls, which is why the forecast is cached and refreshed only every 12 hours by default — keep the interval within your plan's quota.
 
-### Forecast-driven charge control (writes to the charger)
+### EV charge control (writes to the charger)
 
-When enabled, the worker drives the EV charger from the solar forecast: while a car is connected it fast-charges on predicted surplus (`predictedSolar − OtherLoads`), pauses when the surplus falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), pauses when it falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+
+A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages only at/above `BatteryFullSocPercent` (so the car never competes with charging the home battery) and, once charging, keeps going until SOC falls below `BatteryReleaseSocPercent` — the band stops the car's own draw from flapping the gate.
 
 ```jsonc
 "ChargeControl": {
   "Enabled": false,             // master switch — OFF by default (see warning)
   "DryRun": false,              // when Enabled: log intended writes but don't write (validation)
   "NominalVoltage": 230,
+  "Phases": 1,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
   "MinChargingCurrentAmps": 6,
   "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
   "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
-  "ResumeHysteresisWatts": 200  // extra surplus needed to (re)start, to avoid flapping
+  "ResumeHysteresisWatts": 200, // extra surplus needed to (re)start, to avoid flapping
+  "BatteryFullSocPercent": 95,  // SOC at/above which charging engages
+  "BatteryReleaseSocPercent": 90 // SOC it must fall below to disengage
 }
 ```
+
+**Set `Phases` to match your charger.** The 6 A EVSE minimum is a *current* limit; its power floor depends on phase count — ~1.4 kW single-phase vs **~4.2 kW three-phase** — and the watts↔amps setpoint uses `watts / (NominalVoltage × Phases)`. A three-phase charger left at `Phases: 1` would start on a ~1.4 kW surplus while the car pulls ~4.2 kW, importing the difference from the grid.
 
 The current setpoint is encoded to the SolaX hardware's requirements automatically: rounded to a whole amp, clamped to the charger's **6–32 A** range, and written with the register's **0.01 A scale** (value = amps × 100). Pausing switches the use-mode to `Stop` and leaves the current setpoint untouched (0 A would be below the hardware minimum).
 

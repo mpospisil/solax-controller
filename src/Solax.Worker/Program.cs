@@ -86,12 +86,14 @@ builder.Services.AddSingleton<IEvChargerControl>(services =>
 builder.Services.AddSingleton<IChargingController>(services =>
 {
     var options = services.GetRequiredService<IOptions<ChargeControlOptions>>().Value;
-    return new SolarForecastChargingController(
-        options.NominalVoltage,
+    return new LiveSolarChargingController(
+        new ChargePowerConverter(options.NominalVoltage, options.Phases),
         options.MinChargingCurrentAmps,
         options.MaxChargingCurrentAmps,
         options.CurrentStepAmps,
-        options.ResumeHysteresisWatts);
+        options.ResumeHysteresisWatts,
+        options.BatteryFullSocPercent,
+        options.BatteryReleaseSocPercent);
 });
 
 builder.Services.AddSingleton<ChargingControlCoordinator>();
