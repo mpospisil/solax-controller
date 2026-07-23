@@ -6,9 +6,9 @@ namespace Solax.Core.Tests.Strategies;
 
 public class SolarForecastChargingControllerTests
 {
-    // 230V, 6-20A, 1A steps, 200W hysteresis on resume. minWatts = 6 * 230 = 1380W.
+    // 230V single-phase, 6-20A, 1A steps, 200W hysteresis on resume. minWatts = 6 * 230 = 1380W.
     private static readonly SolarForecastChargingController Controller = new(
-        nominalVoltage: 230,
+        new ChargePowerConverter(nominalVoltage: 230, phases: 1),
         minChargingCurrentAmps: 6,
         maxChargingCurrentAmps: 20,
         currentStepAmps: 1,
@@ -31,11 +31,19 @@ public class SolarForecastChargingControllerTests
 
     private static ChargingControlInput Input(
         EvChargerStatus status,
-        double predictedSolarWatts,
+        double? predictedSolarWatts,
         double otherLoadsWatts,
         EvChargerSettings currentSettings,
         bool hasControl) =>
         new(StateWith(status, otherLoadsWatts), predictedSolarWatts, currentSettings, hasControl);
+
+    [Fact]
+    public void Connected_NoForecast_LeavesChargerUntouched()
+    {
+        var result = Controller.Decide(Input(EvChargerStatus.Charging, predictedSolarWatts: null, 0, Charging10A, hasControl: true));
+
+        Assert.Equal(ChargingControlAction.None, result.Action);
+    }
 
     [Fact]
     public void Available_WithControl_RestoresOriginal()

@@ -42,19 +42,13 @@ public sealed class ChargingControlCoordinator
         {
             var current = await _chargerControl.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
+            // Fetched for the forecast strategy; passed through as nullable so the controller decides
+            // what a missing forecast means (the live-solar strategy ignores it entirely).
             var forecastNow = _forecast.GetForecastForToday()?.ExpectedPowerWattsAt(state.Timestamp);
-
-            // Without a forecast we can't compute a predicted surplus, so leave the charger as-is --
-            // but still let a disconnect restore the original settings below.
-            if (forecastNow is null && state.EvChargerStatus != EvChargerStatus.Available)
-            {
-                _logger.LogDebug("No solar forecast available yet; leaving charger unchanged.");
-                return;
-            }
 
             var input = new ChargingControlInput(
                 state,
-                PredictedSolarPowerWatts: forecastNow ?? 0,
+                PredictedSolarPowerWatts: forecastNow,
                 CurrentSettings: current,
                 HasControl: _originalSettings is not null);
 

@@ -96,14 +96,17 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task NoForecast_WhileConnected_LeavesChargerUntouched()
+    public async Task NoForecast_IsForwardedAsNullToController_NotSkipped()
     {
+        // The coordinator no longer skips on a missing forecast; it passes it through as null and
+        // lets the controller decide (so live-solar, which ignores the forecast, still runs).
         _forecast.Today = null;
-        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "would charge");
+        _controller.NextDecision = new(ChargingControlAction.None, null, "controller's call");
 
         await Cycle(EvChargerStatus.Charging);
 
-        Assert.Empty(_charger.Applied);
+        Assert.NotNull(_controller.LastInput);
+        Assert.Null(_controller.LastInput!.PredictedSolarPowerWatts);
     }
 
     [Fact]
