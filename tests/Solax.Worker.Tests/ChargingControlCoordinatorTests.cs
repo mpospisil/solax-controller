@@ -11,14 +11,11 @@ public class ChargingControlCoordinatorTests
 
     private readonly FakeEvChargerControl _charger = new();
     private readonly StubChargingController _controller = new();
-    private readonly FakeSolarForecastService _forecast = new();
     private readonly ChargingControlCoordinator _coordinator;
 
     public ChargingControlCoordinatorTests()
     {
-        // A forecast period covering Now, so the coordinator has a predicted value to work with.
-        _forecast.Today = new SolarForecast(Now, [new SolarForecastPeriod(Now.AddMinutes(15), TimeSpan.FromMinutes(30), 3000)]);
-        _coordinator = new ChargingControlCoordinator(_controller, _charger, _forecast, NullLogger<ChargingControlCoordinator>.Instance);
+        _coordinator = new ChargingControlCoordinator(_controller, _charger, NullLogger<ChargingControlCoordinator>.Instance);
     }
 
     private static EnergyState State(EvChargerStatus status) =>
@@ -93,33 +90,5 @@ public class ChargingControlCoordinatorTests
         await Cycle(EvChargerStatus.Available);
 
         Assert.Empty(_charger.Applied);
-    }
-
-    [Fact]
-    public async Task NoForecast_IsForwardedAsNullToController_NotSkipped()
-    {
-        // The coordinator no longer skips on a missing forecast; it passes it through as null and
-        // lets the controller decide (so live-solar, which ignores the forecast, still runs).
-        _forecast.Today = null;
-        _controller.NextDecision = new(ChargingControlAction.None, null, "controller's call");
-
-        await Cycle(EvChargerStatus.Charging);
-
-        Assert.NotNull(_controller.LastInput);
-        Assert.Null(_controller.LastInput!.PredictedSolarPowerWatts);
-    }
-
-    [Fact]
-    public async Task NoForecast_OnDisconnect_StillRestores()
-    {
-        _charger.CurrentSettings = Original;
-        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
-        await Cycle(EvChargerStatus.Charging); // establish control while forecast present
-
-        _forecast.Today = null; // forecast now unavailable
-        _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
-        await Cycle(EvChargerStatus.Available);
-
-        Assert.Equal(Original, _charger.Applied[^1].Target);
     }
 }

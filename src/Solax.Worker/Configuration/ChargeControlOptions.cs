@@ -1,19 +1,10 @@
 namespace Solax.Worker.Configuration;
 
-/// <summary>Which signal drives EV charge control.</summary>
-public enum ChargeControlStrategy
-{
-    /// <summary>Charge from the Solcast solar forecast (predicted PV minus Other Loads).</summary>
-    Forecast,
-
-    /// <summary>Charge from live PV surplus, only while the home battery is full (SOC gate).</summary>
-    LiveSolar,
-}
-
 /// <summary>
-/// Configuration for EV charge control. Bound from the <c>"ChargeControl"</c> section. Disabled by
-/// default: this feature writes to the charger hardware, and the control register addresses must be
-/// verified against your device before it is safe to enable.
+/// Configuration for EV charge control. Charging is driven from live PV surplus while the home
+/// battery is full (see <see cref="BatteryFullSocPercent"/>). Bound from the <c>"ChargeControl"</c>
+/// section. Disabled by default: this feature writes to the charger hardware, and the control
+/// register addresses must be verified against your device before it is safe to enable.
 /// </summary>
 public sealed class ChargeControlOptions
 {
@@ -21,9 +12,6 @@ public sealed class ChargeControlOptions
 
     /// <summary>Master on/off switch. Off by default (writes to hardware — verify registers first).</summary>
     public bool Enabled { get; init; }
-
-    /// <summary>Which control strategy to use: <see cref="ChargeControlStrategy.Forecast"/> (default) or LiveSolar.</summary>
-    public ChargeControlStrategy Strategy { get; init; } = ChargeControlStrategy.Forecast;
 
     /// <summary>
     /// When true (and <see cref="Enabled"/>), the control loop runs and logs exactly what it would

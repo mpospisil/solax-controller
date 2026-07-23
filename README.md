@@ -142,24 +142,22 @@ If the API key or resource id is missing, the worker logs a warning and skips fo
 
 ### EV charge control (writes to the charger)
 
-When enabled, the worker drives the EV charger from solar surplus: while a car is connected it fast-charges on the available surplus, pauses when it falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change. Two strategies are selectable via `Strategy`:
+When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), pauses when it falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
 
-- **`Forecast`** (default) — surplus = `predictedSolar − OtherLoads`, from the Solcast forecast.
-- **`LiveSolar`** — surplus = live `actualSolar − OtherLoads`, and only while the home battery is essentially full (SOC gate, `BatteryFullSocPercent` / `BatteryReleaseSocPercent` hysteresis).
+A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages only at/above `BatteryFullSocPercent` (so the car never competes with charging the home battery) and, once charging, keeps going until SOC falls below `BatteryReleaseSocPercent` — the band stops the car's own draw from flapping the gate.
 
 ```jsonc
 "ChargeControl": {
   "Enabled": false,             // master switch — OFF by default (see warning)
   "DryRun": false,              // when Enabled: log intended writes but don't write (validation)
-  "Strategy": "Forecast",       // "Forecast" or "LiveSolar"
   "NominalVoltage": 230,
   "Phases": 1,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
   "MinChargingCurrentAmps": 6,
   "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
   "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
   "ResumeHysteresisWatts": 200, // extra surplus needed to (re)start, to avoid flapping
-  "BatteryFullSocPercent": 95,  // LiveSolar: SOC at/above which charging engages
-  "BatteryReleaseSocPercent": 90 // LiveSolar: SOC it must fall below to disengage
+  "BatteryFullSocPercent": 95,  // SOC at/above which charging engages
+  "BatteryReleaseSocPercent": 90 // SOC it must fall below to disengage
 }
 ```
 

@@ -5,9 +5,9 @@ using Solax.Core.Models;
 namespace Solax.Worker;
 
 /// <summary>
-/// Orchestrates one forecast-driven charge-control cycle: reads the charger's current settings,
-/// asks the <see cref="IChargingController"/> what to do, and applies it — backing up the owner's
-/// original settings before the first override and restoring them when the car disconnects.
+/// Orchestrates one charge-control cycle: reads the charger's current settings, asks the
+/// <see cref="IChargingController"/> what to do, and applies it — backing up the owner's original
+/// settings before the first override and restoring them when the car disconnects.
 ///
 /// Holds the backup state across cycles, so it is registered as a singleton. All hardware errors
 /// are caught and logged so a control failure never disrupts the polling loop. Only invoked when
@@ -17,7 +17,6 @@ public sealed class ChargingControlCoordinator
 {
     private readonly IChargingController _controller;
     private readonly IEvChargerControl _chargerControl;
-    private readonly ISolarForecastService _forecast;
     private readonly ILogger<ChargingControlCoordinator> _logger;
 
     // Non-null while we hold control: the settings the charger had before we first overrode them,
@@ -27,12 +26,10 @@ public sealed class ChargingControlCoordinator
     public ChargingControlCoordinator(
         IChargingController controller,
         IEvChargerControl chargerControl,
-        ISolarForecastService forecast,
         ILogger<ChargingControlCoordinator> logger)
     {
         _controller = controller;
         _chargerControl = chargerControl;
-        _forecast = forecast;
         _logger = logger;
     }
 
@@ -42,13 +39,8 @@ public sealed class ChargingControlCoordinator
         {
             var current = await _chargerControl.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
-            // Fetched for the forecast strategy; passed through as nullable so the controller decides
-            // what a missing forecast means (the live-solar strategy ignores it entirely).
-            var forecastNow = _forecast.GetForecastForToday()?.ExpectedPowerWattsAt(state.Timestamp);
-
             var input = new ChargingControlInput(
                 state,
-                PredictedSolarPowerWatts: forecastNow,
                 CurrentSettings: current,
                 HasControl: _originalSettings is not null);
 

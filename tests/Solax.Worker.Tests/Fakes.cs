@@ -40,12 +40,3 @@ internal sealed class StubChargingController : IChargingController
         return NextDecision;
     }
 }
-
-internal sealed class FakeSolarForecastService : ISolarForecastService
-{
-    public SolarForecast? Today { get; set; }
-
-    public SolarForecast? GetForecastForToday() => Today;
-
-    public SolarForecast? GetForecast(DateTimeOffset from, DateTimeOffset to) => Today;
-}

@@ -38,7 +38,7 @@ public class LiveSolarChargingControllerTests
         double surplusWatts,
         EvChargerSettings currentSettings,
         bool hasControl) =>
-        new(State(socPercent, status, surplusWatts), PredictedSolarPowerWatts: null, currentSettings, hasControl);
+        new(State(socPercent, status, surplusWatts), currentSettings, hasControl);
 
     [Fact]
     public void Available_WithControl_RestoresOriginal()
