@@ -24,8 +24,6 @@ public sealed class EvChargerControl : IEvChargerControl
     // (16A -> 1600). Values are constrained to the hardware's 6-32A range on write, no matter what the
     // caller asks for, so we can never send a current the charger rejects.
     private const double CurrentRegisterAmpsPerCount = 0.01;
-    private const int HardwareMinCurrentAmps = 6;
-    private const int HardwareMaxCurrentAmps = 32;
 
     private readonly IModbusClient _client;
     private readonly ILogger<EvChargerControl> _logger;
@@ -35,10 +33,8 @@ public sealed class EvChargerControl : IEvChargerControl
     // writes and change-detection behaves like a real run instead of re-logging every poll.
     private EvChargerSettings? _simulated;
 
-    // The charger's raw register values from before we first overrode anything. Kept raw (rather than
-    // the decoded whole-amp model) so a restore puts back exactly what the owner had -- no clamping to
-    // 6-32A and no rounding of the 0.01A scale.
-    private (ushort Mode, ushort Current)? _original;
+    // The known safe idle state written when we release control (see ResetAsync).
+    private static readonly EvChargerSettings ResetSettings = new(EvChargerMode.Stop, EvChargerLimits.MinCurrentAmps);
 
     public EvChargerControl(
         [FromKeyedServices(ModbusClientKeys.EvCharger)] IModbusClient client,
@@ -97,7 +93,7 @@ public sealed class EvChargerControl : IEvChargerControl
         if (current.ChargeCurrentAmps != target.ChargeCurrentAmps)
         {
             // Clamp to the hardware's accepted range, then encode with the 0.01A register scale.
-            var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, HardwareMinCurrentAmps, HardwareMaxCurrentAmps);
+            var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, EvChargerLimits.MinCurrentAmps, EvChargerLimits.MaxCurrentAmps);
             var registerValue = (ushort)Math.Round(clampedAmps / CurrentRegisterAmpsPerCount);
 
             _logger.LogInformation(
@@ -120,90 +116,36 @@ public sealed class EvChargerControl : IEvChargerControl
         return target;
     }
 
-    public bool HasOriginal => _original is not null;
-
-    public async Task CaptureOriginalAsync(CancellationToken cancellationToken = default)
+    public async Task SendCommandAsync(
+        EvChargerControlCommand command,
+        string reason,
+        CancellationToken cancellationToken = default)
     {
-        if (_original is not null)
+        if (!_dryRun)
         {
-            return;
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Read the raw registers straight from the device (bypassing the dry-run simulation) so the
-        // snapshot is the owner's true starting configuration.
-        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-        var mode = await ReadRegisterAsync(EvChargerRegisterMap.ChargerUseMode, cancellationToken).ConfigureAwait(false);
-        var current = await ReadRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint, cancellationToken).ConfigureAwait(false);
-
-        _original = (mode, current);
-
+        var prefix = _dryRun ? "[DRY RUN] would send " : "sending ";
         _logger.LogInformation(
-            "Captured original charger settings for restore: Mode={Mode} (register {ModeRegister}), Current={Amps}A (register {CurrentRegister}).",
-            (EvChargerMode)mode, mode, current * CurrentRegisterAmpsPerCount, current);
+            "{Prefix}charger control command: {Command} (register {RegisterValue}). {Reason}",
+            prefix, command, (ushort)command, reason);
+
+        if (!_dryRun)
+        {
+            await _client
+                .WriteSingleRegisterAsync(EvChargerRegisterMap.ControlCommand.Address, (ushort)command, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
-    public async Task<bool> RestoreOriginalAsync(string reason, CancellationToken cancellationToken = default)
+    public async Task ResetAsync(string reason, CancellationToken cancellationToken = default)
     {
-        if (_original is not (var originalMode, var originalCurrent))
-        {
-            return false;
-        }
+        // Mode and current are persistent settings, so reuse the normal change-detecting write path.
+        var current = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        await ApplyAsync(current, ResetSettings, reason, cancellationToken).ConfigureAwait(false);
 
-        var (activeMode, activeCurrent) = await ReadActiveRawAsync(cancellationToken).ConfigureAwait(false);
-        var prefix = _dryRun ? "[DRY RUN] would restore " : "restoring ";
-
-        // Written verbatim: these values came off the device, so they need no clamping or rounding.
-        if (activeMode != originalMode)
-        {
-            _logger.LogInformation(
-                "{Prefix}charger use-mode: {OldMode} -> {NewMode} (register {RegisterValue}). {Reason}",
-                prefix, (EvChargerMode)activeMode, (EvChargerMode)originalMode, originalMode, reason);
-
-            if (!_dryRun)
-            {
-                await _client
-                    .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargerUseMode.Address, originalMode, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-
-        if (activeCurrent != originalCurrent)
-        {
-            _logger.LogInformation(
-                "{Prefix}charger current setpoint: {OldAmps}A -> {NewAmps}A (register {RegisterValue}). {Reason}",
-                prefix,
-                activeCurrent * CurrentRegisterAmpsPerCount,
-                originalCurrent * CurrentRegisterAmpsPerCount,
-                originalCurrent,
-                reason);
-
-            if (!_dryRun)
-            {
-                await _client
-                    .WriteSingleRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, originalCurrent, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-
-        // Only released once every write above succeeded, so a failed restore is retried next cycle.
-        _original = null;
-        _simulated = null;
-        return true;
-    }
-
-    // The raw registers currently active on the device -- or, in dry-run, the values our simulated
-    // writes would have left there, so the restore log reflects the simulated timeline.
-    private async Task<(ushort Mode, ushort Current)> ReadActiveRawAsync(CancellationToken cancellationToken)
-    {
-        if (_dryRun && _simulated is not null)
-        {
-            return ((ushort)_simulated.Mode, (ushort)Math.Round(_simulated.ChargeCurrentAmps / CurrentRegisterAmpsPerCount));
-        }
-
-        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-        var mode = await ReadRegisterAsync(EvChargerRegisterMap.ChargerUseMode, cancellationToken).ConfigureAwait(false);
-        var current = await ReadRegisterAsync(EvChargerRegisterMap.ChargeCurrentSetpoint, cancellationToken).ConfigureAwait(false);
-        return (mode, current);
+        await SendCommandAsync(EvChargerControlCommand.StopCharging, reason, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ushort> ReadRegisterAsync(RegisterDescriptor register, CancellationToken cancellationToken)

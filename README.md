@@ -142,7 +142,11 @@ If the API key or resource id is missing, the worker logs a warning and skips fo
 
 ### EV charge control (writes to the charger)
 
-When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), pauses when it falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. Once the conditions are met (battery full + enough surplus) it **starts a session** — including from an idle `Available`/`Stop` charger, which is exactly where its own reset leaves things — by setting Fast mode with the computed current and issuing a `Start Charging` command. The command is sent only on the transition into charging, not on every poll. It writes only values that differ from what's already on the device and logs every change.
+
+The current setpoint is always constrained to what the hardware accepts (**6–32 A**): the configured min/max are clamped into that range up-front, so the controller can never even target an illegal value, and the write path clamps again as a final guard.
+
+When it releases control — the car is unplugged, or the service shuts down — the charger is **reset to a known idle state**: use-mode `Stop`, current setpoint `6 A`, plus a `Stop Charging` control command (register `0x627`). Mode and current are written only if they differ; the stop command is always issued, since it's an action rather than a stored setting.
 
 A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages only at/above `BatteryFullSocPercent` (so the car never competes with charging the home battery) and, once charging, keeps going until SOC falls below `BatteryReleaseSocPercent` — the band stops the car's own draw from flapping the gate.
 
@@ -166,6 +170,8 @@ A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages 
 The current setpoint is encoded to the SolaX hardware's requirements automatically: rounded to a whole amp, clamped to the charger's **6–32 A** range, and written with the register's **0.01 A scale** (value = amps × 100). Pausing switches the use-mode to `Stop` and leaves the current setpoint untouched (0 A would be below the hardware minimum).
 
 **Validate first with `DryRun`.** Set `Enabled: true` and `DryRun: true` to run the full control loop and log exactly what it *would* write — e.g. `[DRY RUN] would set charger current setpoint: 6A -> 16A (register 1600)` — without touching the charger. This is the safe way to confirm the register values against your device before allowing real writes.
+
+In dry-run, **nothing is ever written to a SolaX device**. That's enforced twice: each write site is skipped, and the Modbus clients are wrapped in a read-only decorator that drops writes outright, so even a caller that forgot its guard cannot reach the hardware. A suppressed write logs a warning as a tripwire — it should never appear.
 
 > ⚠️ **This feature writes to your charger's Modbus holding registers.** The control-register addresses (`ChargerUseMode 0x60D`, `ChargeCurrentSetpoint 0x628`) and `EvChargerMode` values come from the SolaX X1/X3-HAC protocol / the wills106 register map, but **GEN1/GEN2 and firmware differences exist** — GEN1 uses Datahub Charge Current `0x624`, some GEN2 units use EVSE Mode `0x669`. **Verify them against your specific charger before setting `Enabled: true`.** It is disabled by default for exactly this reason.
 

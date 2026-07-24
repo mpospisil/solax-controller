@@ -41,11 +41,45 @@ public class LiveSolarChargingControllerTests
         new(State(socPercent, status, surplusWatts), currentSettings, hasControl);
 
     [Fact]
-    public void Available_WithControl_RestoresOriginal()
+    public void Available_AndStopped_WithConditionsMet_StartsCharging()
     {
-        var result = Controller.Decide(Input(100, EvChargerStatus.Available, 5000, Stopped, hasControl: true));
+        // The charger sits idle (Available + Stop) -- exactly where our own reset leaves it. With the
+        // battery full and surplus available, charging must start from here.
+        var result = Controller.Decide(Input(100, EvChargerStatus.Available, 5000, Stopped, hasControl: false));
 
-        Assert.Equal(ChargingControlAction.Restore, result.Action);
+        Assert.Equal(ChargingControlAction.Charge, result.Action);
+        Assert.Equal(EvChargerMode.Fast, result.TargetSettings!.Mode);
+    }
+
+    [Fact]
+    public void Available_WithConditionsNotMet_AndHoldingControl_ResetsToIdle()
+    {
+        var result = Controller.Decide(Input(50, EvChargerStatus.Available, 5000, Charging10A, hasControl: true));
+
+        Assert.Equal(ChargingControlAction.Pause, result.Action);
+    }
+
+    [Fact]
+    public void ConditionsNotMet_WithoutControl_LeavesChargerUntouched()
+    {
+        var result = Controller.Decide(Input(50, EvChargerStatus.Available, 5000, Stopped, hasControl: false));
+
+        Assert.Equal(ChargingControlAction.None, result.Action);
+    }
+
+    [Fact]
+    public void ConfiguredMaxAboveHardwareLimit_IsClampedTo32A()
+    {
+        // Configured 40A max, but the hardware only accepts 6-32A: a huge surplus must still target 32A.
+        var overConfigured = new LiveSolarChargingController(
+            new ChargePowerConverter(nominalVoltage: 230, phases: 1),
+            minChargingCurrentAmps: 6, maxChargingCurrentAmps: 40, currentStepAmps: 1,
+            hysteresisWatts: 200, fullSocPercent: 95, releaseSocPercent: 90);
+
+        var result = overConfigured.Decide(Input(100, EvChargerStatus.Charging, 30000, Charging10A, hasControl: true));
+
+        Assert.Equal(ChargingControlAction.Charge, result.Action);
+        Assert.Equal(EvChargerLimits.MaxCurrentAmps, result.TargetSettings!.ChargeCurrentAmps);
     }
 
     [Fact]

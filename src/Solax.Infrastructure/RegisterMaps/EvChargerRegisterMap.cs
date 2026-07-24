@@ -16,4 +16,7 @@ public static class EvChargerRegisterMap
 
     public static readonly RegisterDescriptor ChargeCurrentSetpoint =
         new((ushort)EvChargerRegister.ChargeCurrentSetpoint, nameof(ChargeCurrentSetpoint), "A");
+
+    public static readonly RegisterDescriptor ControlCommand =
+        new((ushort)EvChargerRegister.ControlCommand, nameof(ControlCommand), "enum");
 }

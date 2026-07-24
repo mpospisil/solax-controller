@@ -19,6 +19,9 @@ public sealed class ChargingControlCoordinator
     private readonly IEvChargerControl _chargerControl;
     private readonly ILogger<ChargingControlCoordinator> _logger;
 
+    // True once we've overridden the charger, until it has been reset back to the idle state.
+    private bool _hasControl;
+
     public ChargingControlCoordinator(
         IChargingController controller,
         IEvChargerControl chargerControl,
@@ -38,7 +41,7 @@ public sealed class ChargingControlCoordinator
             var input = new ChargingControlInput(
                 state,
                 CurrentSettings: current,
-                HasControl: _chargerControl.HasOriginal);
+                HasControl: _hasControl);
 
             var decision = _controller.Decide(input);
 
@@ -47,13 +50,12 @@ public sealed class ChargingControlCoordinator
                 case ChargingControlAction.None:
                     break;
 
-                case ChargingControlAction.Restore:
-                    await RestoreAsync(cancellationToken).ConfigureAwait(false);
+                case ChargingControlAction.Charge:
+                    await ChargeAsync(current, decision, cancellationToken).ConfigureAwait(false);
                     break;
 
-                case ChargingControlAction.Charge:
                 case ChargingControlAction.Pause:
-                    await ApplyTakingControlAsync(current, decision, cancellationToken).ConfigureAwait(false);
+                    await ResetToIdleAsync(decision.Reason, cancellationToken).ConfigureAwait(false);
                     break;
             }
         }
@@ -68,51 +70,65 @@ public sealed class ChargingControlCoordinator
     }
 
     /// <summary>
-    /// Puts the charger back to the owner's original settings when the service is shutting down, so we
-    /// never leave our override behind. Safe to call when we don't hold control (it's a no-op), and
-    /// failures are logged rather than blocking shutdown.
+    /// Resets the charger to the idle state when the service is shutting down, so we never leave our
+    /// override behind. No-op when we don't hold control, and failures are logged rather than blocking
+    /// shutdown.
     /// </summary>
-    public async Task RestoreOnShutdownAsync(CancellationToken cancellationToken)
+    public async Task ResetOnShutdownAsync(CancellationToken cancellationToken)
     {
+        if (!_hasControl)
+        {
+            return;
+        }
+
         try
         {
-            if (await _chargerControl
-                    .RestoreOriginalAsync("Service stopping; restoring original charger settings.", cancellationToken)
-                    .ConfigureAwait(false))
-            {
-                _logger.LogInformation("Released charge control on shutdown; original charger settings restored.");
-            }
+            await ResetToIdleAsync("Service stopping.", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to restore original charger settings on shutdown; the charger may still hold our override.");
+            _logger.LogWarning(ex, "Failed to reset the charger on shutdown; it may still hold our override.");
         }
     }
 
-    private async Task ApplyTakingControlAsync(
+    private async Task ChargeAsync(
         EvChargerSettings current,
         ChargingControlDecision decision,
         CancellationToken cancellationToken)
     {
-        // Snapshot the owner's original settings before the first override (no-op afterwards), so
-        // every value we change can be put back exactly on disconnect.
-        await _chargerControl.CaptureOriginalAsync(cancellationToken).ConfigureAwait(false);
+        var starting = !_hasControl;
 
         // ApplyAsync writes only the fields that differ and logs each change.
         await _chargerControl
             .ApplyAsync(current, decision.TargetSettings!, decision.Reason, cancellationToken)
             .ConfigureAwait(false);
+
+        // The charger may be sitting idle/stopped (e.g. after our own reset), so a mode change alone
+        // won't necessarily begin a session -- issue the start command, but only on the transition so
+        // we don't re-send it every poll while charging.
+        if (starting)
+        {
+            await _chargerControl
+                .SendCommandAsync(EvChargerControlCommand.StartCharging, decision.Reason, cancellationToken)
+                .ConfigureAwait(false);
+            _hasControl = true;
+            _logger.LogInformation("Took charge control; started charging from live solar surplus.");
+        }
     }
 
-    private async Task RestoreAsync(CancellationToken cancellationToken)
+    private async Task ResetToIdleAsync(string reason, CancellationToken cancellationToken)
     {
-        var restored = await _chargerControl
-            .RestoreOriginalAsync("Car disconnected; restoring original charger settings.", cancellationToken)
-            .ConfigureAwait(false);
-
-        if (restored)
+        if (!_hasControl)
         {
-            _logger.LogInformation("Released charge control; original charger settings restored.");
+            return;
         }
+
+        await _chargerControl.ResetAsync(reason, cancellationToken).ConfigureAwait(false);
+
+        // Only released once the reset writes succeeded, so a failed reset is retried next cycle.
+        _hasControl = false;
+        _logger.LogInformation(
+            "Released charge control; charger reset to Stop at {Amps}A with a stop-charging command.",
+            EvChargerLimits.MinCurrentAmps);
     }
 }

@@ -19,10 +19,12 @@ namespace Solax.Core.Strategies;
 /// </summary>
 public sealed class LiveSolarChargingController : IChargingController
 {
-    // Charger states in which a vehicle is connected and we may take control. Anything else that
-    // isn't Available (Faulted, Unavailable, Update, ...) is left untouched to avoid fighting it.
+    // Charger states we may drive. Available is included so a session can be STARTED from the idle
+    // "stopped" state (which is exactly where our own reset leaves the charger). Anything else
+    // (Faulted, Unavailable, Update, ...) is left untouched to avoid fighting the device.
     private static readonly HashSet<EvChargerStatus> ControllableStates =
     [
+        EvChargerStatus.Available,
         EvChargerStatus.Preparing,
         EvChargerStatus.Charging,
         EvChargerStatus.SuspendedEv,
@@ -60,8 +62,11 @@ public sealed class LiveSolarChargingController : IChargingController
         }
 
         _power = powerConverter ?? throw new ArgumentNullException(nameof(powerConverter));
-        _minChargingCurrentAmps = minChargingCurrentAmps;
-        _maxChargingCurrentAmps = maxChargingCurrentAmps;
+
+        // Constrain the configured range to what the hardware accepts, so the controller can never
+        // target (or log) a setpoint the charger would reject.
+        _minChargingCurrentAmps = Math.Clamp(minChargingCurrentAmps, EvChargerLimits.MinCurrentAmps, EvChargerLimits.MaxCurrentAmps);
+        _maxChargingCurrentAmps = Math.Clamp(maxChargingCurrentAmps, _minChargingCurrentAmps, EvChargerLimits.MaxCurrentAmps);
         _currentStepAmps = currentStepAmps;
         _hysteresisWatts = hysteresisWatts;
         _fullSocPercent = fullSocPercent;
@@ -71,13 +76,6 @@ public sealed class LiveSolarChargingController : IChargingController
     public ChargingControlDecision Decide(ChargingControlInput input)
     {
         var status = input.State.EvChargerStatus;
-
-        if (status == EvChargerStatus.Available)
-        {
-            return input.HasControl
-                ? new ChargingControlDecision(ChargingControlAction.Restore, null, "Car disconnected; restoring original charger settings.")
-                : new ChargingControlDecision(ChargingControlAction.None, null, "No car connected.");
-        }
 
         if (!ControllableStates.Contains(status))
         {
@@ -94,9 +92,7 @@ public sealed class LiveSolarChargingController : IChargingController
         if (!gateOpen)
         {
             var threshold = currentlyCharging ? _releaseSocPercent : _fullSocPercent;
-            return input.HasControl
-                ? Pause(input, $"Battery {soc:F0}% below {threshold:F0}% full-battery gate; pausing.")
-                : new ChargingControlDecision(ChargingControlAction.None, null, $"Battery {soc:F0}% below {threshold:F0}%; waiting for a full battery before charging from solar.");
+            return Idle(input, $"Battery {soc:F0}% below {threshold:F0}% full-battery gate.");
         }
 
         var availableWatts = input.State.SolarPowerWatts - input.State.OtherLoadsPowerWatts;
@@ -107,13 +103,13 @@ public sealed class LiveSolarChargingController : IChargingController
         var startThresholdWatts = currentlyCharging ? minWatts : minWatts + _hysteresisWatts;
         if (availableWatts < startThresholdWatts)
         {
-            return Pause(input, $"Live surplus {availableWatts:F0}W below {(currentlyCharging ? "minimum" : "resume")} threshold {startThresholdWatts:F0}W; pausing.");
+            return Idle(input, $"Live surplus {availableWatts:F0}W below {(currentlyCharging ? "minimum" : "start")} threshold {startThresholdWatts:F0}W.");
         }
 
         var targetAmps = ToHardwareCurrent(availableWatts);
         if (targetAmps < _minChargingCurrentAmps)
         {
-            return Pause(input, $"Live surplus {availableWatts:F0}W quantises below minimum {_minChargingCurrentAmps}A; pausing.");
+            return Idle(input, $"Live surplus {availableWatts:F0}W quantises below minimum {_minChargingCurrentAmps}A.");
         }
 
         return new ChargingControlDecision(
@@ -135,10 +131,10 @@ public sealed class LiveSolarChargingController : IChargingController
         return Math.Min(steppedAmps, _maxChargingCurrentAmps);
     }
 
-    // Pausing switches the use-mode to Stop but keeps the existing current setpoint: the charge
-    // current register has a 6A hardware minimum, so writing 0 would be an invalid value.
-    private static ChargingControlDecision Pause(ChargingControlInput input, string reason) =>
-        new(ChargingControlAction.Pause,
-            new EvChargerSettings(EvChargerMode.Stop, input.CurrentSettings.ChargeCurrentAmps),
-            reason);
+    // Conditions aren't met. If we're driving the charger, ask for it to be put back to idle; if we
+    // never took control, leave the owner's charger completely alone.
+    private static ChargingControlDecision Idle(ChargingControlInput input, string reason) =>
+        input.HasControl
+            ? new ChargingControlDecision(ChargingControlAction.Pause, null, $"{reason} Resetting charger to idle.")
+            : new ChargingControlDecision(ChargingControlAction.None, null, $"{reason} Leaving charger untouched.");
 }

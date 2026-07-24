@@ -23,22 +23,22 @@ public interface IEvChargerControl
         string reason,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Whether an original-settings snapshot is currently held (i.e. we hold control).</summary>
-    bool HasOriginal { get; }
+    /// <summary>
+    /// Sends a one-shot control command (e.g. <see cref="Enums.EvChargerControlCommand.StartCharging"/>)
+    /// to the charger. Commands are actions rather than stored settings, so they are always written
+    /// (there is nothing to compare against) — send them only on a real transition.
+    /// </summary>
+    Task SendCommandAsync(
+        Enums.EvChargerControlCommand command,
+        string reason,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Snapshots the charger's original settings before we first override them, so they can be put
-    /// back exactly. No-op if a snapshot is already held. Captures the raw register values, not the
-    /// decoded model, so the restore is byte-exact.
+    /// Returns the charger to a known safe idle state when we release control: use-mode
+    /// <see cref="Enums.EvChargerMode.Stop"/>, the minimum 6 A current setpoint, and a
+    /// <see cref="Enums.EvChargerControlCommand.StopCharging"/> command. The mode and current are
+    /// written only if they differ from what's active; the stop command is always issued (it is a
+    /// command, not a persistent setting). Every write is logged.
     /// </summary>
-    Task CaptureOriginalAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Writes the captured original settings back to the charger verbatim — every value we changed
-    /// (use-mode and current setpoint), without the safety clamping/rounding applied to computed
-    /// setpoints, since these values came from the device itself. Only registers that actually differ
-    /// are written, each change is logged, and the snapshot is released on success. Returns false when
-    /// there was no snapshot to restore.
-    /// </summary>
-    Task<bool> RestoreOriginalAsync(string reason, CancellationToken cancellationToken = default);
+    Task ResetAsync(string reason, CancellationToken cancellationToken = default);
 }
