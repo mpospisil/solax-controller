@@ -147,6 +147,41 @@ public class LiveSolarChargingControllerTests
     }
 
     [Fact]
+    public void CloudPasses_SuspendsCharging_ThenResumesWhenSurplusReturns()
+    {
+        var suspended = new EvChargerSettings(EvChargerMode.Stop, 6); // what a pause leaves behind
+
+        // 1. Charging happily on 4000W of surplus.
+        var charging = Controller.Decide(Input(96, EvChargerStatus.Charging, 4000, Charging10A, hasControl: true));
+        Assert.Equal(ChargingControlAction.Charge, charging.Action);
+
+        // 2. A cloud drops the surplus below the 6A floor -> suspend (the coordinator pauses; it never
+        //    sends a stop command, so the session survives).
+        var paused = Controller.Decide(Input(96, EvChargerStatus.Charging, 1000, Charging10A, hasControl: true));
+        Assert.Equal(ChargingControlAction.Pause, paused.Action);
+
+        // 3. The cloud clears. The charger is now suspended (Stop/6A) and control was released, yet the
+        //    returning surplus must bring charging straight back.
+        var resumed = Controller.Decide(Input(96, EvChargerStatus.ChargePaused, 4000, suspended, hasControl: false));
+        Assert.Equal(ChargingControlAction.Charge, resumed.Action);
+        Assert.Equal(EvChargerMode.Fast, resumed.TargetSettings!.Mode);
+        Assert.Equal(17, resumed.TargetSettings.ChargeCurrentAmps); // 4000W / 230V -> 17A
+    }
+
+    // The 6A hard cutoff: a car won't accept less than 6A, so below that we must STOP rather than sit
+    // at the 6A minimum -- otherwise the charger makes up the shortfall from the grid.
+    [Theory]
+    [InlineData(1380, ChargingControlAction.Charge)] // exactly 6A worth -> keep charging
+    [InlineData(1379, ChargingControlAction.Pause)]  // one watt short -> must stop, never idle at 6A
+    [InlineData(920, ChargingControlAction.Pause)]   // ~4A worth -> must stop
+    public void WhileCharging_SurplusAtOrBelowTheSixAmpFloor_ChargesOrStops(double surplusWatts, ChargingControlAction expected)
+    {
+        var result = Controller.Decide(Input(96, EvChargerStatus.Charging, surplusWatts, Charging10A, hasControl: true));
+
+        Assert.Equal(expected, result.Action);
+    }
+
+    [Fact]
     public void ThreePhase_SurplusBelowThreePhaseFloor_Pauses()
     {
         // Three-phase: min = 6 * 230 * 3 = 4140W. A 3000W surplus clears the single-phase floor but

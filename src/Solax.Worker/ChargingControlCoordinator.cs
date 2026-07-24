@@ -6,12 +6,12 @@ namespace Solax.Worker;
 
 /// <summary>
 /// Orchestrates one charge-control cycle: reads the charger's current settings, asks the
-/// <see cref="IChargingController"/> what to do, and applies it — backing up the owner's original
-/// settings before the first override and restoring them when the car disconnects.
+/// <see cref="IChargingController"/> what to do, and applies it — starting a session on the
+/// transition into charging, and pausing (never terminating) it when the surplus runs out.
 ///
-/// Holds the backup state across cycles, so it is registered as a singleton. All hardware errors
-/// are caught and logged so a control failure never disrupts the polling loop. Only invoked when
-/// <c>ChargeControl:Enabled</c> is true.
+/// Holds the "do we currently drive the charger" flag across cycles, so it is registered as a
+/// singleton. All hardware errors are caught and logged so a control failure never disrupts the
+/// polling loop. Only invoked when <c>ChargeControl:Enabled</c> is true.
 /// </summary>
 public sealed class ChargingControlCoordinator
 {
@@ -55,7 +55,7 @@ public sealed class ChargingControlCoordinator
                     break;
 
                 case ChargingControlAction.Pause:
-                    await ResetToIdleAsync(decision.Reason, cancellationToken).ConfigureAwait(false);
+                    await PauseChargingAsync(decision.Reason, cancellationToken).ConfigureAwait(false);
                     break;
             }
         }
@@ -70,11 +70,11 @@ public sealed class ChargingControlCoordinator
     }
 
     /// <summary>
-    /// Resets the charger to the idle state when the service is shutting down, so we never leave our
-    /// override behind. No-op when we don't hold control, and failures are logged rather than blocking
+    /// Pauses charging when the service is shutting down, so we never leave the charger drawing under
+    /// our override. No-op when we don't hold control, and failures are logged rather than blocking
     /// shutdown.
     /// </summary>
-    public async Task ResetOnShutdownAsync(CancellationToken cancellationToken)
+    public async Task PauseOnShutdownAsync(CancellationToken cancellationToken)
     {
         if (!_hasControl)
         {
@@ -83,11 +83,11 @@ public sealed class ChargingControlCoordinator
 
         try
         {
-            await ResetToIdleAsync("Service stopping.", cancellationToken).ConfigureAwait(false);
+            await PauseChargingAsync("Service stopping.", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to reset the charger on shutdown; it may still hold our override.");
+            _logger.LogWarning(ex, "Failed to pause the charger on shutdown; it may still be charging under our override.");
         }
     }
 
@@ -116,19 +116,19 @@ public sealed class ChargingControlCoordinator
         }
     }
 
-    private async Task ResetToIdleAsync(string reason, CancellationToken cancellationToken)
+    private async Task PauseChargingAsync(string reason, CancellationToken cancellationToken)
     {
         if (!_hasControl)
         {
             return;
         }
 
-        await _chargerControl.ResetAsync(reason, cancellationToken).ConfigureAwait(false);
+        await _chargerControl.PauseAsync(reason, cancellationToken).ConfigureAwait(false);
 
-        // Only released once the reset writes succeeded, so a failed reset is retried next cycle.
+        // Only released once the pause writes succeeded, so a failed pause is retried next cycle.
         _hasControl = false;
         _logger.LogInformation(
-            "Released charge control; charger reset to Stop at {Amps}A with a stop-charging command.",
+            "Paused charging; charger suspended at {Amps}A. The session is left intact so it can resume.",
             EvChargerLimits.MinCurrentAmps);
     }
 }
