@@ -44,9 +44,8 @@ public sealed class EnergyStateReader : IEnergyStateReader
             batteryPowerRaw: FromBlock(inverterBlock, InverterRegisterMap.BatteryPowerCharge1),
             pvPowerDc1Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc1),
             pvPowerDc2Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc2),
-            gridPowerRRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerR),
-            gridPowerSRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerS),
-            gridPowerTRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerT),
+            feedinPowerLowRaw: FromBlock(inverterBlock, InverterRegisterMap.FeedinPowerLow),
+            feedinPowerHighRaw: FromBlock(inverterBlock, InverterRegisterMap.FeedinPowerHigh),
             evChargerStatusRaw: evStatus,
             evChargerPowerRaw: evPower) with { ChargeMode = evChargeMode, ChargeCurrentAmps = evChargeCurrent };
     }
