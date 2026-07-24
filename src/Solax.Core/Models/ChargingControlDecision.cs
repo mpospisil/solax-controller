@@ -7,6 +7,11 @@ namespace Solax.Core.Models;
 /// charger this cycle.
 /// </summary>
 /// <param name="State">The latest energy snapshot (carries charger status, SOC, and the Other Loads residual).</param>
+/// <param name="SurplusWatts">
+/// The solar surplus to decide on — the <em>smoothed</em> (moving-average) value, not the
+/// instantaneous <see cref="EnergyState.SolarSurplusPowerWatts"/>, so a momentary cloud doesn't
+/// interrupt a long charging session.
+/// </param>
 /// <param name="CurrentSettings">The charger's currently active settings, read from the hardware.</param>
 /// <param name="HasControl">
 /// Whether the orchestrator currently holds control (i.e. has backed up the original settings and
@@ -14,6 +19,7 @@ namespace Solax.Core.Models;
 /// </param>
 public sealed record ChargingControlInput(
     EnergyState State,
+    double SurplusWatts,
     EvChargerSettings CurrentSettings,
     bool HasControl);
 

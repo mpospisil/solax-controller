@@ -36,6 +36,7 @@ public sealed class EnergyStateReader : IEnergyStateReader
         var evStatus = await ReadAsync(_evChargerClient, EvChargerRegisterMap.RunMode, cancellationToken).ConfigureAwait(false);
         var evPower = await ReadAsync(_evChargerClient, EvChargerRegisterMap.ChargePowerTotal, cancellationToken).ConfigureAwait(false);
         var evChargeMode = await TryReadChargeModeAsync(cancellationToken).ConfigureAwait(false);
+        var evChargeCurrent = await TryReadChargeCurrentAsync(cancellationToken).ConfigureAwait(false);
 
         return EnergyState.FromRawRegisters(
             DateTimeOffset.UtcNow,
@@ -43,11 +44,27 @@ public sealed class EnergyStateReader : IEnergyStateReader
             batteryPowerRaw: FromBlock(inverterBlock, InverterRegisterMap.BatteryPowerCharge1),
             pvPowerDc1Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc1),
             pvPowerDc2Raw: FromBlock(inverterBlock, InverterRegisterMap.Powerdc2),
-            gridPowerRRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerR),
-            gridPowerSRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerS),
-            gridPowerTRaw: FromBlock(inverterBlock, InverterRegisterMap.GridPowerT),
+            feedinPowerLowRaw: FromBlock(inverterBlock, InverterRegisterMap.FeedinPowerLow),
+            feedinPowerHighRaw: FromBlock(inverterBlock, InverterRegisterMap.FeedinPowerHigh),
             evChargerStatusRaw: evStatus,
-            evChargerPowerRaw: evPower) with { ChargeMode = evChargeMode };
+            evChargerPowerRaw: evPower) with { ChargeMode = evChargeMode, ChargeCurrentAmps = evChargeCurrent };
+    }
+
+    // Reads the charger's active current setpoint (a holding register, 0.01A scale). Best-effort for
+    // the same reason as the mode: a failed read must not fail the whole telemetry poll.
+    private async Task<int?> TryReadChargeCurrentAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var values = await _evChargerClient
+                .ReadHoldingRegistersAsync(EvChargerRegisterMap.ChargeCurrentSetpoint.Address, numberOfPoints: 1, cancellationToken)
+                .ConfigureAwait(false);
+            return (int)Math.Round(values[0] * 0.01);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     // Reads the charger's work/use mode (a holding register). Best-effort: this register isn't

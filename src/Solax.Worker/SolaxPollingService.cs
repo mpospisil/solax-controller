@@ -9,7 +9,6 @@ namespace Solax.Worker;
 public sealed class SolaxPollingService : BackgroundService
 {
     private readonly IEnergyStateReader _energyStateReader;
-    private readonly IChargingStrategy _chargingStrategy;
     private readonly ISolarForecastService _solarForecast;
     private readonly ChargingControlCoordinator _chargingControl;
     private readonly bool _chargeControlEnabled;
@@ -19,7 +18,6 @@ public sealed class SolaxPollingService : BackgroundService
 
     public SolaxPollingService(
         IEnergyStateReader energyStateReader,
-        IChargingStrategy chargingStrategy,
         ISolarForecastService solarForecast,
         ChargingControlCoordinator chargingControl,
         IOptions<SolaxOptions> options,
@@ -27,7 +25,6 @@ public sealed class SolaxPollingService : BackgroundService
         ILogger<SolaxPollingService> logger)
     {
         _energyStateReader = energyStateReader;
-        _chargingStrategy = chargingStrategy;
         _solarForecast = solarForecast;
         _chargingControl = chargingControl;
         _chargeControlEnabled = chargeControlOptions.Value.Enabled;
@@ -64,13 +61,14 @@ public sealed class SolaxPollingService : BackgroundService
                 var state = await _energyStateReader.ReadAsync(stoppingToken);
 
                 _logger.LogInformation(
-                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvMode={EvChargeMode} EvPower={EvChargerPowerWatts}W",
+                    "SOC={BatterySocPercent}% BatteryPower={BatteryPowerWatts}W Solar={SolarPowerWatts}W Grid={GridPowerWatts}W EvCharger={EvChargerStatus} EvMode={EvChargeMode} EvCurrent={EvChargeCurrentAmps} EvPower={EvChargerPowerWatts}W",
                     state.BatterySocPercent,
                     state.BatteryPowerWatts,
                     state.SolarPowerWatts,
                     state.GridPowerWatts,
                     state.EvChargerStatus,
                     (object?)state.ChargeMode ?? "n/a",
+                    state.ChargeCurrentAmps is null ? "n/a" : $"{state.ChargeCurrentAmps}A",
                     state.EvChargerPowerWatts);
 
                 LogSolarActualVsForecast(state);
@@ -78,19 +76,6 @@ public sealed class SolaxPollingService : BackgroundService
                 if (_chargeControlEnabled)
                 {
                     await _chargingControl.RunCycleAsync(state, stoppingToken);
-                }
-
-                if (state.EvChargerStatus == EvChargerStatus.Charging)
-                {
-                    var recommendation = _chargingStrategy.Evaluate(state, ChargingMode.SolarOnly);
-
-                    _logger.LogInformation(
-                        "EV charging surplus: Surplus={SurplusPowerWatts}W AvailableSolar={AvailableSolarPowerWatts}W RecommendedPower={RecommendedChargingPowerWatts}W RecommendedCurrent={RecommendedChargingCurrentAmps}A Available={IsSurplusAvailable}",
-                        recommendation.SurplusPowerWatts,
-                        state.AvailableSolarPowerWatts,
-                        recommendation.RecommendedChargingPowerWatts,
-                        recommendation.RecommendedChargingCurrentAmps,
-                        recommendation.IsSurplusAvailable);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -40,6 +40,20 @@ public sealed class ChargeControlOptions
     public int CurrentStepAmps { get; init; } = 1;
 
     /// <summary>
+    /// How far back the solar surplus is averaged before it drives any decision. Raw PV is erratic,
+    /// so decisions are made on this rolling average rather than the instantaneous value — a brief
+    /// cloud then can't interrupt a long charging session.
+    /// </summary>
+    public TimeSpan SurplusAverageWindow { get; init; } = TimeSpan.FromMinutes(3);
+
+    /// <summary>
+    /// Minimum change (in amps) between the current setpoint and a new target before a Modbus write
+    /// is issued. At the default 1 A, a charger sitting at 10 A is only re-commanded once the average
+    /// calls for 11 A or 9 A. Raise it to damp the charger further.
+    /// </summary>
+    public int CurrentChangeThresholdAmps { get; init; } = 1;
+
+    /// <summary>
     /// Extra surplus (watts) required above the minimum before charging (re)starts, so a surplus
     /// hovering near the minimum doesn't flap the charger on and off.
     /// </summary>

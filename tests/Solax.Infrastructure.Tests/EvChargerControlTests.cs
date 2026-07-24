@@ -94,6 +94,37 @@ public class EvChargerControlTests
         Assert.Equal([(CurrentAddress, (ushort)3200)], client.Writes); // clamped to 32A -> 3200
     }
 
+    // 1A hysteresis: a charger sitting at 10A is only re-commanded once the target reaches 11A or 9A.
+    [Theory]
+    [InlineData(10, 10, false)] // no change
+    [InlineData(10, 11, true)]  // +1A -> write
+    [InlineData(10, 9, true)]   // -1A -> write
+    public async Task ApplyAsync_OnlyWritesCurrentWhenItMovesByAtLeastTheThreshold(int currentAmps, int targetAmps, bool expectWrite)
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).ApplyAsync(
+            current: new EvChargerSettings(EvChargerMode.Fast, currentAmps),
+            target: new EvChargerSettings(EvChargerMode.Fast, targetAmps),
+            "threshold");
+
+        Assert.Equal(expectWrite, client.Writes.Count > 0);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_LargerThreshold_SuppressesSmallSetpointMoves()
+    {
+        // With a 3A threshold, 10A -> 12A is not worth a write, but 10A -> 13A is.
+        var client = new FakeModbusClient();
+        var control = new EvChargerControl(client, NullLogger<EvChargerControl>.Instance, currentChangeThresholdAmps: 3);
+
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Fast, 10), new EvChargerSettings(EvChargerMode.Fast, 12), "small move");
+        Assert.Empty(client.Writes);
+
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Fast, 10), new EvChargerSettings(EvChargerMode.Fast, 13), "big move");
+        Assert.Equal([(CurrentAddress, (ushort)1300)], client.Writes);
+    }
+
     [Fact]
     public async Task PauseAsync_SuspendsViaModeAndNeverSendsAStopCommand()
     {

@@ -146,11 +146,55 @@ When enabled, the worker drives the EV charger from **live solar surplus**, and 
 
 The current setpoint is always constrained to what the hardware accepts (**6–32 A**): the configured min/max are clamped into that range up-front, so the controller can never even target an illegal value, and the write path clamps again as a final guard.
 
+#### How the surplus is calculated
+
+```
+Surplus = Solar production − household consumption
+```
+
+where household consumption **excludes battery charging and EV charging** — so whatever the house isn't using is what the car may have. Charging from it therefore neither imports from the grid nor discharges the battery, and the car is free to outbid battery charging.
+
+Household consumption is the "Other Loads" residual from the energy balance:
+
+```
+OtherLoads = PV + Grid − EV − Battery        (Grid +ve = importing, Battery +ve = charging)
+Surplus    = Solar − OtherLoads
+```
+
+**This requires the grid meter, not the inverter's output.** `Grid` comes from **`FeedinPower` (`0x0046`, int32, low word first, positive = export)** — the CT/meter reading at the utility connection, the only register that sees the whole house. It lives inside the telemetry block already fetched, so it costs no extra round-trip.
+
+> ⚠️ The per-phase registers `0x6C/0x70/0x74` (mapped as `GridPowerR/S/T`) are **not** the grid meter — they report the **inverter's AC output**. Verified live: they track `Solar − Battery` at ~94–96% (inverter efficiency), while `FeedinPower` simultaneously read a genuine 388 W export. Using them for household load produces nonsense (a 2.4 kW-of-sun reading once yielded a 13 kW "surplus"). They are kept in the map for reference only.
+
+Worked example from a live run: Solar 2498 W, exporting 388 W, battery idle, EV idle →
+`OtherLoads = 2498 − 388 = 2110 W`, so `Surplus = 2498 − 2110 = 388 W` — exactly the exported power.
+
+#### Smoothing: moving average and hysteresis
+
+Raw solar generation is erratic, so the controller never reacts to instantaneous data. Two buffering strategies keep it stable:
+
+**1. The 3-minute moving average.** Every poll, the surplus (`PV − Load`) is pushed into a rolling time window and the *average* drives every decision. A single 15-second dark cloud therefore can't interrupt a 3-hour charging session — only a sustained drop moves the average enough to matter. The window is `SurplusAverageWindow` (default `00:03:00`); samples older than it are evicted each poll.
+
+**2. The 1-amp hysteresis threshold.** A Modbus write is only issued when the new target differs from the charger's active setpoint by at least `CurrentChangeThresholdAmps` (default 1 A ≈ 230 W per phase). If the car is charging at 10 A, no command is sent until the average calls for 11 A or 9 A. Raise the threshold to damp the charger further (e.g. 3 A means 10 A → 12 A is ignored, 10 A → 13 A is written).
+
+These stack with the existing state hysteresis — the asymmetric start/stop thresholds on both the surplus and the battery SOC gate — so the charger is never nudged by noise.
+
+You can watch all of it in the log; each control cycle prints the raw surplus, the average, the sample count, the charger's active setpoint, and the target:
+
+```
+Charge control: Surplus=4180W Avg=3990W (12 samples) Setpoint=16A Target=17A Action=Charge. ...
+```
+
+and the telemetry line now carries the charger's active current:
+
+```
+SOC=96% ... EvCharger=Charging EvMode=Fast EvCurrent=16A EvPower=3680W
+```
+
 #### The 6 A hard cutoff — why the controller must explicitly stop
 
 This project bypasses the charger's native surplus modes: it runs its own Modbus loop and sets the exact current from its own `Surplus = PV − Load` calculation. That makes one rule critical.
 
-An EV will not accept a 2 A or 4 A charge — **6 A is the floor** (IEC 61851). So the logic engine has a hard cutoff:
+An EV will not accept a 2 A or 4 A charge — **6 A is the floor** (IEC 61851). So the logic engine has a hard cutoff (applied to the *averaged* surplus):
 
 - **Surplus ≥ 6 A** → write the charger's amperage to match the surplus.
 - **Surplus < 6 A** → **explicitly send a Stop/Pause command.**
@@ -179,15 +223,26 @@ A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages 
   "Enabled": false,             // master switch — OFF by default (see warning)
   "DryRun": false,              // when Enabled: log intended writes but don't write (validation)
   "NominalVoltage": 230,
-  "Phases": 1,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
+  "Phases": 3,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
   "MinChargingCurrentAmps": 6,
-  "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
+  "MaxChargingCurrentAmps": 16, // setpoint is clamped to this (see "vehicle limit" below)
   "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
+  "SurplusAverageWindow": "00:03:00",  // rolling window the surplus is averaged over
+  "CurrentChangeThresholdAmps": 1,     // min amp change before re-commanding the charger
   "ResumeHysteresisWatts": 200, // extra surplus needed to (re)start, to avoid flapping
   "BatteryFullSocPercent": 95,  // SOC at/above which charging engages
   "BatteryReleaseSocPercent": 90 // SOC it must fall below to disengage
 }
 ```
+
+**The vehicle is usually the binding limit, not the charger.** Charging negotiates down to the *lowest shared capability*, so `MaxChargingCurrentAmps` should reflect whichever of the car and the wallbox is lower. For a **VW ID.4** (the reference setup here):
+
+| Setup | Car's limit | Configure |
+|---|---|---|
+| Three-phase (X3-HAC 11/22 kW) | **16 A/phase → 11 kW** — the ID.4's onboard charger caps here even on a 22 kW/32 A wallbox | `Phases: 3`, `MaxChargingCurrentAmps: 16` |
+| Single-phase (X1-HAC-7) | **32 A → 7.2 kW** — the ID.4 pulls the wallbox's full current | `Phases: 1`, `MaxChargingCurrentAmps: 32` |
+
+Setting a max above what the car will accept isn't dangerous (it simply won't draw it), but it makes the surplus maths optimistic — the controller thinks it has more headroom than the car will use. The defaults above are the three-phase ID.4 values.
 
 **Set `Phases` to match your charger.** The 6 A EVSE minimum is a *current* limit; its power floor depends on phase count — ~1.4 kW single-phase vs **~4.2 kW three-phase** — and the watts↔amps setpoint uses `watts / (NominalVoltage × Phases)`. A three-phase charger left at `Phases: 1` would start on a ~1.4 kW surplus while the car pulls ~4.2 kW, importing the difference from the grid.
 

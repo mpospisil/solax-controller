@@ -22,6 +22,12 @@ public static class InverterRegisterMap
     public static readonly RegisterDescriptor BatteryCapacity =
         new((ushort)InverterRegister.BatteryCapacity, nameof(BatteryCapacity), "%");
 
+    public static readonly RegisterDescriptor FeedinPowerLow =
+        new((ushort)InverterRegister.FeedinPowerLow, nameof(FeedinPowerLow), "W");
+
+    public static readonly RegisterDescriptor FeedinPowerHigh =
+        new((ushort)InverterRegister.FeedinPowerHigh, nameof(FeedinPowerHigh), "W");
+
     public static readonly RegisterDescriptor GridPowerR =
         new((ushort)InverterRegister.GridPowerR, nameof(GridPowerR), "W");
 
