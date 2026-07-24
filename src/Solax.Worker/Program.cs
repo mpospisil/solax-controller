@@ -44,15 +44,6 @@ builder.Services.AddKeyedSingleton<IModbusClient>(ModbusClientKeys.EvCharger, (s
 
 builder.Services.AddSingleton<IEnergyStateReader, EnergyStateReader>();
 
-builder.Services.AddSingleton<IChargingStrategy>(services =>
-{
-    var options = services.GetRequiredService<IOptions<SolaxOptions>>().Value.ChargingStrategy;
-    return new SolarSurplusChargingStrategy(
-        options.NominalVoltage,
-        options.MinChargingCurrentAmps,
-        options.MaxChargingCurrentAmps);
-});
-
 // Solcast solar-forecast integration. The API key is a secret and is not stored in
 // appsettings.json -- supply it via user-secrets (development) or an environment variable
 // (deployment): Solcast:ApiKey / Solcast__ApiKey.

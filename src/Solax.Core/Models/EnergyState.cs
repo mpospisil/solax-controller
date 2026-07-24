@@ -28,10 +28,12 @@ public sealed record EnergyState(
 
     /// <summary>
     /// Household consumption excluding the EV charger, the battery, and PV -- the "Other Loads"
-    /// residual shown in the SolaX Cloud app. Derived from the same energy balance documented on
-    /// <see cref="Strategies.SolarSurplusChargingStrategy"/> (positive Grid = importing, positive
-    /// Battery = charging):
+    /// residual shown in the SolaX Cloud app (positive Grid = importing, positive Battery = charging):
     /// <code>OtherLoads = PV + Grid - EV - Battery</code>
+    /// !! UNRELIABLE on this hardware: the mapped grid register reports the inverter's AC output
+    /// rather than the grid meter, so this figure is not trustworthy and must not drive charging
+    /// decisions. Reading the real meter (FeedinPower, 0x0046) would fix it. See
+    /// <see cref="SolarSurplusPowerWatts"/>, which deliberately avoids the grid register entirely.
     /// </summary>
     public double OtherLoadsPowerWatts =>
         SolarPowerWatts + GridPowerWatts - EvChargerPowerWatts - BatteryPowerWatts;
