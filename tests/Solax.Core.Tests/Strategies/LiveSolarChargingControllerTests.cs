@@ -146,6 +146,19 @@ public class LiveSolarChargingControllerTests
         Assert.Equal(ChargingControlAction.Pause, result.Action);
     }
 
+    // The 6A hard cutoff: a car won't accept less than 6A, so below that we must STOP rather than sit
+    // at the 6A minimum -- otherwise the charger makes up the shortfall from the grid.
+    [Theory]
+    [InlineData(1380, ChargingControlAction.Charge)] // exactly 6A worth -> keep charging
+    [InlineData(1379, ChargingControlAction.Pause)]  // one watt short -> must stop, never idle at 6A
+    [InlineData(920, ChargingControlAction.Pause)]   // ~4A worth -> must stop
+    public void WhileCharging_SurplusAtOrBelowTheSixAmpFloor_ChargesOrStops(double surplusWatts, ChargingControlAction expected)
+    {
+        var result = Controller.Decide(Input(96, EvChargerStatus.Charging, surplusWatts, Charging10A, hasControl: true));
+
+        Assert.Equal(expected, result.Action);
+    }
+
     [Fact]
     public void ThreePhase_SurplusBelowThreePhaseFloor_Pauses()
     {
