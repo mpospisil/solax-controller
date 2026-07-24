@@ -47,12 +47,12 @@ public class ChargingControlCoordinatorTests
         _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
         await Cycle(EvChargerStatus.Available); // restore
 
-        Assert.Equal(2, _charger.Applied.Count);
-        Assert.Equal(Original, _charger.Applied[^1].Target); // restored to the original
+        Assert.Equal(Original, _charger.Restored); // every original value put back
+        Assert.False(_charger.HasOriginal); // control released
 
-        // Control released: a further restore does nothing.
+        // A further restore does nothing.
         await Cycle(EvChargerStatus.Available);
-        Assert.Equal(2, _charger.Applied.Count);
+        Assert.Single(_charger.Applied); // only the original charge write, no extra writes
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class ChargingControlCoordinatorTests
         _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
         await Cycle(EvChargerStatus.Available);
 
-        Assert.Equal(Original, _charger.Applied[^1].Target); // still the very first original, not Fast/10
+        Assert.Equal(Original, _charger.Restored); // still the very first original, not Fast/10
     }
 
     [Fact]

@@ -94,6 +94,130 @@ public class EvChargerControlTests
     }
 
     [Fact]
+    public async Task RestoreOriginalAsync_PutsBackBothModeAndCurrent()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
+        client.SetHolding(CurrentAddress, 1600); // 16A
+        var control = Create(client);
+
+        await control.CaptureOriginalAsync();
+        Assert.True(control.HasOriginal);
+
+        // We take over: Fast at 20A.
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Eco, 16), new EvChargerSettings(EvChargerMode.Fast, 20), "charge");
+        client.Writes.Clear();
+
+        Assert.True(await control.RestoreOriginalAsync("disconnect"));
+
+        // Every changed value is put back: mode AND current setpoint.
+        Assert.Contains((ModeAddress, (ushort)EvChargerMode.Eco), client.Writes);
+        Assert.Contains((CurrentAddress, (ushort)1600), client.Writes);
+        Assert.Equal(2, client.Writes.Count);
+        Assert.False(control.HasOriginal); // snapshot released
+    }
+
+    [Fact]
+    public async Task RestoreOriginalAsync_RestoresValuesOutsideTheSafetyClampVerbatim()
+    {
+        // The 6-32A clamp guards computed setpoints; a restore must put back exactly what the device
+        // had, even if that's outside the clamp (here 0), instead of silently writing 6A.
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Stop);
+        client.SetHolding(CurrentAddress, 0);
+        var control = Create(client);
+
+        await control.CaptureOriginalAsync();
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Stop, 0), new EvChargerSettings(EvChargerMode.Fast, 20), "charge");
+        client.Writes.Clear();
+
+        await control.RestoreOriginalAsync("disconnect");
+
+        Assert.Contains((CurrentAddress, (ushort)0), client.Writes); // verbatim 0, not clamped to 600
+    }
+
+    [Fact]
+    public async Task RestoreOriginalAsync_PreservesSubAmpPrecision()
+    {
+        // 1650 = 16.5A. The whole-amp model would round this to 17A (1700); the raw snapshot restores
+        // the exact original register value.
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Green);
+        client.SetHolding(CurrentAddress, 1650);
+        var control = Create(client);
+
+        await control.CaptureOriginalAsync();
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Green, 17), new EvChargerSettings(EvChargerMode.Fast, 20), "charge");
+        client.Writes.Clear();
+
+        await control.RestoreOriginalAsync("disconnect");
+
+        Assert.Contains((CurrentAddress, (ushort)1650), client.Writes);
+    }
+
+    [Fact]
+    public async Task RestoreOriginalAsync_WritesNothingWhenAlreadyAtOriginal()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
+        client.SetHolding(CurrentAddress, 1600);
+        var control = Create(client);
+
+        await control.CaptureOriginalAsync();
+        client.Writes.Clear();
+
+        Assert.True(await control.RestoreOriginalAsync("disconnect"));
+
+        Assert.Empty(client.Writes); // nothing was changed, so nothing to put back
+    }
+
+    [Fact]
+    public async Task CaptureOriginalAsync_IsIdempotent_KeepingTheFirstSnapshot()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
+        client.SetHolding(CurrentAddress, 1600);
+        var control = Create(client);
+
+        await control.CaptureOriginalAsync();
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Eco, 16), new EvChargerSettings(EvChargerMode.Fast, 20), "charge");
+        await control.CaptureOriginalAsync(); // must NOT re-snapshot the overridden state
+        client.Writes.Clear();
+
+        await control.RestoreOriginalAsync("disconnect");
+
+        Assert.Contains((ModeAddress, (ushort)EvChargerMode.Eco), client.Writes);
+        Assert.Contains((CurrentAddress, (ushort)1600), client.Writes);
+    }
+
+    [Fact]
+    public async Task RestoreOriginalAsync_WithoutSnapshot_ReturnsFalseAndWritesNothing()
+    {
+        var client = new FakeModbusClient();
+
+        Assert.False(await Create(client).RestoreOriginalAsync("spurious"));
+
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
+    public async Task DryRun_RestoreOriginalAsync_WritesNothingToHardware()
+    {
+        var client = new FakeModbusClient();
+        client.SetHolding(ModeAddress, (ushort)EvChargerMode.Eco);
+        client.SetHolding(CurrentAddress, 1600);
+        var control = CreateDryRun(client);
+
+        await control.CaptureOriginalAsync();
+        await control.ApplyAsync(new EvChargerSettings(EvChargerMode.Eco, 16), new EvChargerSettings(EvChargerMode.Fast, 20), "charge");
+        client.Writes.Clear();
+
+        Assert.True(await control.RestoreOriginalAsync("disconnect"));
+
+        Assert.Empty(client.Writes);
+    }
+
+    [Fact]
     public async Task DryRun_ApplyAsync_WritesNothingToHardware()
     {
         var client = new FakeModbusClient();

@@ -19,10 +19,6 @@ public sealed class ChargingControlCoordinator
     private readonly IEvChargerControl _chargerControl;
     private readonly ILogger<ChargingControlCoordinator> _logger;
 
-    // Non-null while we hold control: the settings the charger had before we first overrode them,
-    // to be written back on disconnect.
-    private EvChargerSettings? _originalSettings;
-
     public ChargingControlCoordinator(
         IChargingController controller,
         IEvChargerControl chargerControl,
@@ -42,7 +38,7 @@ public sealed class ChargingControlCoordinator
             var input = new ChargingControlInput(
                 state,
                 CurrentSettings: current,
-                HasControl: _originalSettings is not null);
+                HasControl: _chargerControl.HasOriginal);
 
             var decision = _controller.Decide(input);
 
@@ -52,7 +48,7 @@ public sealed class ChargingControlCoordinator
                     break;
 
                 case ChargingControlAction.Restore:
-                    await RestoreAsync(current, cancellationToken).ConfigureAwait(false);
+                    await RestoreAsync(cancellationToken).ConfigureAwait(false);
                     break;
 
                 case ChargingControlAction.Charge:
@@ -71,18 +67,36 @@ public sealed class ChargingControlCoordinator
         }
     }
 
+    /// <summary>
+    /// Puts the charger back to the owner's original settings when the service is shutting down, so we
+    /// never leave our override behind. Safe to call when we don't hold control (it's a no-op), and
+    /// failures are logged rather than blocking shutdown.
+    /// </summary>
+    public async Task RestoreOnShutdownAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await _chargerControl
+                    .RestoreOriginalAsync("Service stopping; restoring original charger settings.", cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                _logger.LogInformation("Released charge control on shutdown; original charger settings restored.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to restore original charger settings on shutdown; the charger may still hold our override.");
+        }
+    }
+
     private async Task ApplyTakingControlAsync(
         EvChargerSettings current,
         ChargingControlDecision decision,
         CancellationToken cancellationToken)
     {
-        if (_originalSettings is null)
-        {
-            _originalSettings = current;
-            _logger.LogInformation(
-                "Taking charge control; backed up original charger settings (Mode={Mode}, Current={Amps}A).",
-                current.Mode, current.ChargeCurrentAmps);
-        }
+        // Snapshot the owner's original settings before the first override (no-op afterwards), so
+        // every value we change can be put back exactly on disconnect.
+        await _chargerControl.CaptureOriginalAsync(cancellationToken).ConfigureAwait(false);
 
         // ApplyAsync writes only the fields that differ and logs each change.
         await _chargerControl
@@ -90,18 +104,15 @@ public sealed class ChargingControlCoordinator
             .ConfigureAwait(false);
     }
 
-    private async Task RestoreAsync(EvChargerSettings current, CancellationToken cancellationToken)
+    private async Task RestoreAsync(CancellationToken cancellationToken)
     {
-        if (_originalSettings is null)
-        {
-            return;
-        }
-
-        await _chargerControl
-            .ApplyAsync(current, _originalSettings, "Car disconnected; restoring original charger settings.", cancellationToken)
+        var restored = await _chargerControl
+            .RestoreOriginalAsync("Car disconnected; restoring original charger settings.", cancellationToken)
             .ConfigureAwait(false);
 
-        _logger.LogInformation("Released charge control; original charger settings restored.");
-        _originalSettings = null;
+        if (restored)
+        {
+            _logger.LogInformation("Released charge control; original charger settings restored.");
+        }
     }
 }

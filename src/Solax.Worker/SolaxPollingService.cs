@@ -36,12 +36,24 @@ public sealed class SolaxPollingService : BackgroundService
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
 
+    // Shutdown runs with a fresh token (ExecuteAsync's is already cancelled), so the restore write can
+    // still reach the charger. Without this we'd leave our override on the device after stopping.
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_chargeControlEnabled)
+        {
+            await _chargingControl.RestoreOnShutdownAsync(cancellationToken);
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (_chargeControlEnabled)
         {
             _logger.LogInformation(
-                "Forecast-driven charge control is ENABLED ({Mode}).",
+                "Live-solar charge control is ENABLED ({Mode}).",
                 _chargeControlDryRun ? "DRY RUN — no writes to the charger" : "live — writing to the charger");
         }
 
