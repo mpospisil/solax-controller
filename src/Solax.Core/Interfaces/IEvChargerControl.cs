@@ -34,11 +34,13 @@ public interface IEvChargerControl
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the charger to a known safe idle state when we release control: use-mode
-    /// <see cref="Enums.EvChargerMode.Stop"/>, the minimum 6 A current setpoint, and a
-    /// <see cref="Enums.EvChargerControlCommand.StopCharging"/> command. The mode and current are
-    /// written only if they differ from what's active; the stop command is always issued (it is a
-    /// command, not a persistent setting). Every write is logged.
+    /// Pauses charging: sets use-mode <see cref="Enums.EvChargerMode.Stop"/> and the minimum 6 A
+    /// current setpoint, written only if they differ from what's active.
+    ///
+    /// Deliberately does NOT send <see cref="Enums.EvChargerControlCommand.StopCharging"/> — that
+    /// would terminate the session, which on many cars needs a re-plug to restart. Suspending via the
+    /// use-mode keeps the session alive so charging can resume as soon as surplus returns, while still
+    /// halting the draw (so the charger never makes up a shortfall from the grid).
     /// </summary>
-    Task ResetAsync(string reason, CancellationToken cancellationToken = default);
+    Task PauseAsync(string reason, CancellationToken cancellationToken = default);
 }

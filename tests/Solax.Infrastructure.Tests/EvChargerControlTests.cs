@@ -95,41 +95,52 @@ public class EvChargerControlTests
     }
 
     [Fact]
-    public async Task ResetAsync_SetsStopModeSixAmpsAndStopChargingCommand()
+    public async Task PauseAsync_SuspendsViaModeAndNeverSendsAStopCommand()
     {
         var client = new FakeModbusClient();
         client.SetHolding(ModeAddress, (ushort)EvChargerMode.Fast);
         client.SetHolding(CurrentAddress, 2000); // 20A
 
-        await Create(client).ResetAsync("disconnect");
+        await Create(client).PauseAsync("no surplus");
 
         Assert.Contains((ModeAddress, (ushort)EvChargerMode.Stop), client.Writes);
         Assert.Contains((CurrentAddress, (ushort)600), client.Writes); // 6A * 100
-        Assert.Contains((CommandAddress, (ushort)EvChargerControlCommand.StopCharging), client.Writes);
-        Assert.Equal(3, client.Writes.Count);
+        Assert.Equal(2, client.Writes.Count);
+
+        // Critically: the session is NOT terminated, so it can resume without a re-plug.
+        Assert.DoesNotContain(client.Writes, w => w.Address == CommandAddress);
     }
 
     [Fact]
-    public async Task ResetAsync_SkipsModeAndCurrentAlreadyAtIdle_ButStillSendsStopCommand()
+    public async Task PauseAsync_AlreadySuspended_WritesNothing()
     {
         var client = new FakeModbusClient();
         client.SetHolding(ModeAddress, (ushort)EvChargerMode.Stop);
         client.SetHolding(CurrentAddress, 600); // already 6A
 
-        await Create(client).ResetAsync("disconnect");
+        await Create(client).PauseAsync("no surplus");
 
-        // Mode/current unchanged, but the stop command is an action and is always issued.
-        Assert.Equal([(CommandAddress, (ushort)EvChargerControlCommand.StopCharging)], client.Writes);
+        Assert.Empty(client.Writes);
     }
 
     [Fact]
-    public async Task DryRun_ResetAsync_WritesNothingToHardware()
+    public async Task SendCommandAsync_StartCharging_WritesTheCommandRegister()
+    {
+        var client = new FakeModbusClient();
+
+        await Create(client).SendCommandAsync(EvChargerControlCommand.StartCharging, "surplus available");
+
+        Assert.Equal([(CommandAddress, (ushort)EvChargerControlCommand.StartCharging)], client.Writes);
+    }
+
+    [Fact]
+    public async Task DryRun_PauseAsync_WritesNothingToHardware()
     {
         var client = new FakeModbusClient();
         client.SetHolding(ModeAddress, (ushort)EvChargerMode.Fast);
         client.SetHolding(CurrentAddress, 2000);
 
-        await CreateDryRun(client).ResetAsync("disconnect");
+        await CreateDryRun(client).PauseAsync("no surplus");
 
         Assert.Empty(client.Writes);
     }

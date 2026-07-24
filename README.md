@@ -162,15 +162,15 @@ That second branch is the important one. If the controller simply left the charg
 | Surplus | Decision | What is written |
 |---|---|---|
 | ≥ 6 A equivalent | `Charge` | Fast mode + the computed current (whole amps, clamped 6–32 A) |
-| < 6 A equivalent | `Pause` → reset to idle | use-mode `Stop`, current `6 A`, **and** a `Stop Charging` command (`0x627`) |
+| < 6 A equivalent | `Pause` | use-mode `Stop` + current `6 A` — charging is suspended, **not** terminated |
 
-The stop is never implicit: `ResetAsync` always issues the `Stop Charging` command, not just a mode change. Note the threshold is **phase-aware** — the 6 A floor is ~1.4 kW single-phase but ~4.2 kW three-phase (see `Phases`), so on a three-phase charger the cutoff triggers far earlier in watt terms.
+The pause is explicit — the charger is actively suspended rather than left sitting at its 6 A minimum, so it can never make up a shortfall from the grid. It is *not* a session teardown: no `Stop Charging` command is sent, so charging resumes as soon as surplus returns. Note the threshold is **phase-aware** — the 6 A floor is ~1.4 kW single-phase but ~4.2 kW three-phase (see `Phases`), so on a three-phase charger the cutoff triggers far earlier in watt terms.
 
 Two related details:
 - **Hysteresis is asymmetric on purpose:** charging continues down to exactly the 6 A floor, but only *starts* once the surplus clears `6 A + ResumeHysteresisWatts`. So the cutoff is sharp while start-up isn't twitchy.
-- **We only stop what we started.** If the controller isn't holding control (it never started the session), it leaves the charger completely alone rather than stopping a session you began manually.
+- **We only pause what we started.** If the controller isn't holding control (it never started the session), it leaves the charger completely alone rather than suspending a session you began manually.
 
-When it releases control — the car is unplugged, or the service shuts down — the charger is **reset to a known idle state**: use-mode `Stop`, current setpoint `6 A`, plus a `Stop Charging` control command (register `0x627`). Mode and current are written only if they differ; the stop command is always issued, since it's an action rather than a stored setting.
+When the surplus runs out (or the service shuts down) charging is **paused, never terminated**: use-mode is set to `Stop` and the current setpoint to `6 A`, written only if they differ. The `Stop Charging` command (`0x627`) is deliberately **not** sent — that would end the session, which on many cars needs a re-plug to restart. Suspending via the use-mode halts the draw while leaving the session intact so it can resume the moment surplus returns.
 
 A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages only at/above `BatteryFullSocPercent` (so the car never competes with charging the home battery) and, once charging, keeps going until SOC falls below `BatteryReleaseSocPercent` — the band stops the car's own draw from flapping the gate.
 

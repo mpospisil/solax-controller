@@ -33,8 +33,8 @@ public sealed class EvChargerControl : IEvChargerControl
     // writes and change-detection behaves like a real run instead of re-logging every poll.
     private EvChargerSettings? _simulated;
 
-    // The known safe idle state written when we release control (see ResetAsync).
-    private static readonly EvChargerSettings ResetSettings = new(EvChargerMode.Stop, EvChargerLimits.MinCurrentAmps);
+    // The suspended state written when charging is paused (see PauseAsync).
+    private static readonly EvChargerSettings PausedSettings = new(EvChargerMode.Stop, EvChargerLimits.MinCurrentAmps);
 
     public EvChargerControl(
         [FromKeyedServices(ModbusClientKeys.EvCharger)] IModbusClient client,
@@ -139,13 +139,13 @@ public sealed class EvChargerControl : IEvChargerControl
         }
     }
 
-    public async Task ResetAsync(string reason, CancellationToken cancellationToken = default)
+    public async Task PauseAsync(string reason, CancellationToken cancellationToken = default)
     {
-        // Mode and current are persistent settings, so reuse the normal change-detecting write path.
+        // Suspending via the use-mode only: no StopCharging command, so the session stays alive and can
+        // resume without a re-plug. Mode and current are persistent settings, so this reuses the normal
+        // change-detecting write path.
         var current = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        await ApplyAsync(current, ResetSettings, reason, cancellationToken).ConfigureAwait(false);
-
-        await SendCommandAsync(EvChargerControlCommand.StopCharging, reason, cancellationToken).ConfigureAwait(false);
+        await ApplyAsync(current, PausedSettings, reason, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ushort> ReadRegisterAsync(RegisterDescriptor register, CancellationToken cancellationToken)

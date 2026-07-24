@@ -38,20 +38,20 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task PauseDecision_ResetsChargerAndReleasesControl()
+    public async Task PauseDecision_PausesChargerAndReleasesControl()
     {
         _charger.CurrentSettings = Original;
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
         await Cycle(EvChargerStatus.Charging); // takes control
 
         _controller.NextDecision = new(ChargingControlAction.Pause, null, "no surplus");
-        await Cycle(EvChargerStatus.Available); // reset
+        await Cycle(EvChargerStatus.Available); // pause
 
-        Assert.Equal(1, _charger.ResetCount);
+        Assert.Equal(1, _charger.PauseCount);
 
-        // Control released: a further reset decision is a no-op.
+        // Control released: a further pause decision is a no-op.
         await Cycle(EvChargerStatus.Available);
-        Assert.Equal(1, _charger.ResetCount);
+        Assert.Equal(1, _charger.PauseCount);
     }
 
     [Fact]
@@ -68,16 +68,16 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task ResetOnShutdown_ResetsOnlyWhenControlIsHeld()
+    public async Task PauseOnShutdown_PausesOnlyWhenControlIsHeld()
     {
-        await _coordinator.ResetOnShutdownAsync(CancellationToken.None);
-        Assert.Equal(0, _charger.ResetCount); // never took control
+        await _coordinator.PauseOnShutdownAsync(CancellationToken.None);
+        Assert.Equal(0, _charger.PauseCount); // never took control
 
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
         await Cycle(EvChargerStatus.Charging);
 
-        await _coordinator.ResetOnShutdownAsync(CancellationToken.None);
-        Assert.Equal(1, _charger.ResetCount);
+        await _coordinator.PauseOnShutdownAsync(CancellationToken.None);
+        Assert.Equal(1, _charger.PauseCount);
     }
 
     [Fact]
@@ -113,6 +113,6 @@ public class ChargingControlCoordinatorTests
         await Cycle(EvChargerStatus.Available);
 
         Assert.Empty(_charger.Applied);
-        Assert.Equal(0, _charger.ResetCount);
+        Assert.Equal(0, _charger.PauseCount);
     }
 }
