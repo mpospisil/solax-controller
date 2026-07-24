@@ -146,6 +146,19 @@ When enabled, the worker drives the EV charger from **live solar surplus**, and 
 
 The current setpoint is always constrained to what the hardware accepts (**6–32 A**): the configured min/max are clamped into that range up-front, so the controller can never even target an illegal value, and the write path clamps again as a final guard.
 
+#### Never from the grid or the battery
+
+The surplus is derived **only** from PV, battery and EV power — never from the grid register. On this hardware the register at `0x6C/0x70/0x74` reports the **inverter's AC output**, not the grid meter (verified: it tracks `Solar − Battery` at ~96.5%, i.e. inverter efficiency), so it cannot tell us the household load and must not drive charging decisions.
+
+Two rules enforce "solar only":
+
+1. **Never more than the panels make.** The surplus is capped at `Solar − max(Battery, 0)` — you cannot give the car power that doesn't exist, and power the battery is absorbing isn't available either.
+2. **Never at the battery's expense.** If the battery is *discharging*, demand already exceeds supply, so the car gives back exactly that deficit (`EV + Battery`, Battery being negative).
+
+Taking the lower of the two makes the loop self-correcting: any battery discharge the car causes pulls the figure straight back down on the next poll, which then falls through the 6 A cutoff and pauses.
+
+> Because the household load can't be measured without a real grid-meter reading, the cap ignores it — so the house's own consumption may still draw a little from the grid. The car's draw is what's constrained here. Reading the true meter (`FeedinPower`, `0x0046`) would let this account for house load exactly; that's a worthwhile follow-up.
+
 #### Smoothing: moving average and hysteresis
 
 Raw solar generation is erratic, so the controller never reacts to instantaneous data. Two buffering strategies keep it stable:

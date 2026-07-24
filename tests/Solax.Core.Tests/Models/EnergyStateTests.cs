@@ -122,6 +122,57 @@ public class EnergyStateTests
         Assert.Equal(-600, state.GridPowerWatts);
     }
 
+    private static EnergyState StateWith(double solar, double battery, double ev) =>
+        new(
+            DateTimeOffset.UtcNow,
+            BatterySocPercent: 98,
+            BatteryPowerWatts: battery,
+            SolarPowerWatts: solar,
+            GridPowerWatts: -7431, // deliberately bogus: the surplus must not depend on this
+            EvChargerStatus: EvChargerStatus.Charging,
+            EvChargerPowerWatts: ev);
+
+    [Fact]
+    public void SolarSurplus_NeverExceedsWhatThePanelsProduce()
+    {
+        // The real failure: 2.4kW of sun, the car pulling 10.8kW, the battery covering the gap at
+        // 5.2kW. The surplus must never come out above solar production.
+        var state = StateWith(solar: 2422, battery: -5251, ev: 10785);
+
+        Assert.True(
+            state.SolarSurplusPowerWatts <= state.SolarPowerWatts,
+            $"surplus {state.SolarSurplusPowerWatts}W exceeded solar {state.SolarPowerWatts}W");
+        Assert.Equal(2422, state.SolarSurplusPowerWatts);
+    }
+
+    [Fact]
+    public void SolarSurplus_BatteryDischarging_BacksOffByTheDeficit()
+    {
+        // Plenty of sun, but the battery is still covering a 1kW deficit: the car must give that back.
+        var state = StateWith(solar: 9000, battery: -1000, ev: 5000);
+
+        Assert.Equal(4000, state.SolarSurplusPowerWatts); // EV 5000 - 1000 deficit
+    }
+
+    [Fact]
+    public void SolarSurplus_BatteryCharging_ExcludesThePowerTheBatteryIsTaking()
+    {
+        var state = StateWith(solar: 6000, battery: 1500, ev: 0);
+
+        Assert.Equal(4500, state.SolarSurplusPowerWatts);
+    }
+
+    [Fact]
+    public void SolarSurplus_IsIndependentOfTheGridRegister()
+    {
+        // The grid register reports inverter AC output on this hardware, so it must not influence the
+        // surplus at all -- swinging it wildly changes nothing.
+        var a = StateWith(solar: 5000, battery: 0, ev: 0);
+        var b = a with { GridPowerWatts = 99999 };
+
+        Assert.Equal(a.SolarSurplusPowerWatts, b.SolarSurplusPowerWatts);
+    }
+
     [Fact]
     public void OtherLoadsPowerWatts_IsHouseholdBaseLoad_ExcludingPvEvAndBattery()
     {

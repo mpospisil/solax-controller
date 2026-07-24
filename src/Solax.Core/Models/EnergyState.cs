@@ -37,11 +37,31 @@ public sealed record EnergyState(
         SolarPowerWatts + GridPowerWatts - EvChargerPowerWatts - BatteryPowerWatts;
 
     /// <summary>
-    /// Solar power available to the EV right now: production minus the household's Other Loads.
-    /// Reduces to <c>EV + Battery - Grid</c>, i.e. what the car already draws plus what is currently
-    /// being exported — the power that could go to the car without importing from the grid.
+    /// Solar power the EV may draw without importing from the grid or discharging the battery.
+    ///
+    /// Deliberately derived only from PV, battery and EV power — never from the grid register, which
+    /// on this hardware reports the inverter's AC output rather than the meter and cannot tell us the
+    /// household load. Two rules, both directly enforcing "solar only":
+    ///
+    /// 1. It can never exceed what the panels are producing, minus whatever the battery is taking:
+    ///    <c>Solar - max(Battery, 0)</c>. You cannot give the car power that doesn't exist.
+    /// 2. If the battery is <em>discharging</em>, total demand already exceeds supply, so the car must
+    ///    give back exactly that deficit: <c>EV + Battery</c> (Battery being negative here).
+    ///
+    /// Taking the lower of the two makes the loop self-correcting: any battery discharge caused by the
+    /// car pulls the figure straight back down on the next poll.
     /// </summary>
-    public double SolarSurplusPowerWatts => SolarPowerWatts - OtherLoadsPowerWatts;
+    public double SolarSurplusPowerWatts
+    {
+        get
+        {
+            var availableFromPanels = SolarPowerWatts - Math.Max(BatteryPowerWatts, 0);
+
+            return BatteryPowerWatts < 0
+                ? Math.Min(availableFromPanels, EvChargerPowerWatts + BatteryPowerWatts)
+                : availableFromPanels;
+        }
+    }
 
     // Per the SolaX Gen4 protocol: the battery power register is signed 16-bit with
     // positive = charging (negative = discharging). The per-phase grid/feed-in registers are
