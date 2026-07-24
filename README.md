@@ -201,9 +201,9 @@ A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages 
   "Enabled": false,             // master switch — OFF by default (see warning)
   "DryRun": false,              // when Enabled: log intended writes but don't write (validation)
   "NominalVoltage": 230,
-  "Phases": 1,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
+  "Phases": 3,                  // 1 = single-phase, 3 = three-phase (e.g. X3-HAC)
   "MinChargingCurrentAmps": 6,
-  "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
+  "MaxChargingCurrentAmps": 16, // setpoint is clamped to this (see "vehicle limit" below)
   "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
   "SurplusAverageWindow": "00:03:00",  // rolling window the surplus is averaged over
   "CurrentChangeThresholdAmps": 1,     // min amp change before re-commanding the charger
@@ -212,6 +212,15 @@ A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages 
   "BatteryReleaseSocPercent": 90 // SOC it must fall below to disengage
 }
 ```
+
+**The vehicle is usually the binding limit, not the charger.** Charging negotiates down to the *lowest shared capability*, so `MaxChargingCurrentAmps` should reflect whichever of the car and the wallbox is lower. For a **VW ID.4** (the reference setup here):
+
+| Setup | Car's limit | Configure |
+|---|---|---|
+| Three-phase (X3-HAC 11/22 kW) | **16 A/phase → 11 kW** — the ID.4's onboard charger caps here even on a 22 kW/32 A wallbox | `Phases: 3`, `MaxChargingCurrentAmps: 16` |
+| Single-phase (X1-HAC-7) | **32 A → 7.2 kW** — the ID.4 pulls the wallbox's full current | `Phases: 1`, `MaxChargingCurrentAmps: 32` |
+
+Setting a max above what the car will accept isn't dangerous (it simply won't draw it), but it makes the surplus maths optimistic — the controller thinks it has more headroom than the car will use. The defaults above are the three-phase ID.4 values.
 
 **Set `Phases` to match your charger.** The 6 A EVSE minimum is a *current* limit; its power floor depends on phase count — ~1.4 kW single-phase vs **~4.2 kW three-phase** — and the watts↔amps setpoint uses `watts / (NominalVoltage × Phases)`. A three-phase charger left at `Phases: 1` would start on a ~1.4 kW surplus while the car pulls ~4.2 kW, importing the difference from the grid.
 
