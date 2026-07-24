@@ -106,6 +106,31 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
+    public async Task CloudCycle_PausesWithoutStopping_ThenResumes()
+    {
+        _charger.CurrentSettings = Original;
+
+        // 1. Surplus available -> take control and start the session.
+        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 16), "surplus");
+        await Cycle(EvChargerStatus.Charging);
+        Assert.Equal([EvChargerControlCommand.StartCharging], _charger.Commands);
+
+        // 2. Cloud: surplus below the 6A floor -> pause. The session must NOT be torn down.
+        _controller.NextDecision = new(ChargingControlAction.Pause, null, "cloud");
+        await Cycle(EvChargerStatus.Charging);
+        Assert.Equal(1, _charger.PauseCount);
+        Assert.DoesNotContain(EvChargerControlCommand.StopCharging, _charger.Commands);
+
+        // 3. Cloud clears -> charging resumes.
+        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 16), "surplus back");
+        await Cycle(EvChargerStatus.ChargePaused);
+
+        Assert.Equal(new EvChargerSettings(EvChargerMode.Fast, 16), _charger.CurrentSettings);
+        Assert.Equal([EvChargerControlCommand.StartCharging, EvChargerControlCommand.StartCharging], _charger.Commands);
+        Assert.DoesNotContain(EvChargerControlCommand.StopCharging, _charger.Commands);
+    }
+
+    [Fact]
     public async Task PauseDecision_WithoutControl_WritesNothing()
     {
         _controller.NextDecision = new(ChargingControlAction.Pause, null, "spurious");
