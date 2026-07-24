@@ -142,7 +142,9 @@ If the API key or resource id is missing, the worker logs a warning and skips fo
 
 ### EV charge control (writes to the charger)
 
-When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), and pauses when it falls below the minimum viable current. It writes only values that differ from what's already on the device and logs every change.
+When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. Once the conditions are met (battery full + enough surplus) it **starts a session** — including from an idle `Available`/`Stop` charger, which is exactly where its own reset leaves things — by setting Fast mode with the computed current and issuing a `Start Charging` command. The command is sent only on the transition into charging, not on every poll. It writes only values that differ from what's already on the device and logs every change.
+
+The current setpoint is always constrained to what the hardware accepts (**6–32 A**): the configured min/max are clamped into that range up-front, so the controller can never even target an illegal value, and the write path clamps again as a final guard.
 
 When it releases control — the car is unplugged, or the service shuts down — the charger is **reset to a known idle state**: use-mode `Stop`, current setpoint `6 A`, plus a `Stop Charging` control command (register `0x627`). Mode and current are written only if they differ; the stop command is always issued, since it's an action rather than a stored setting.
 

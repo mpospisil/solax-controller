@@ -24,8 +24,6 @@ public sealed class EvChargerControl : IEvChargerControl
     // (16A -> 1600). Values are constrained to the hardware's 6-32A range on write, no matter what the
     // caller asks for, so we can never send a current the charger rejects.
     private const double CurrentRegisterAmpsPerCount = 0.01;
-    private const int HardwareMinCurrentAmps = 6;
-    private const int HardwareMaxCurrentAmps = 32;
 
     private readonly IModbusClient _client;
     private readonly ILogger<EvChargerControl> _logger;
@@ -36,7 +34,7 @@ public sealed class EvChargerControl : IEvChargerControl
     private EvChargerSettings? _simulated;
 
     // The known safe idle state written when we release control (see ResetAsync).
-    private static readonly EvChargerSettings ResetSettings = new(EvChargerMode.Stop, HardwareMinCurrentAmps);
+    private static readonly EvChargerSettings ResetSettings = new(EvChargerMode.Stop, EvChargerLimits.MinCurrentAmps);
 
     public EvChargerControl(
         [FromKeyedServices(ModbusClientKeys.EvCharger)] IModbusClient client,
@@ -95,7 +93,7 @@ public sealed class EvChargerControl : IEvChargerControl
         if (current.ChargeCurrentAmps != target.ChargeCurrentAmps)
         {
             // Clamp to the hardware's accepted range, then encode with the 0.01A register scale.
-            var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, HardwareMinCurrentAmps, HardwareMaxCurrentAmps);
+            var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, EvChargerLimits.MinCurrentAmps, EvChargerLimits.MaxCurrentAmps);
             var registerValue = (ushort)Math.Round(clampedAmps / CurrentRegisterAmpsPerCount);
 
             _logger.LogInformation(
@@ -118,28 +116,36 @@ public sealed class EvChargerControl : IEvChargerControl
         return target;
     }
 
+    public async Task SendCommandAsync(
+        EvChargerControlCommand command,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_dryRun)
+        {
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var prefix = _dryRun ? "[DRY RUN] would send " : "sending ";
+        _logger.LogInformation(
+            "{Prefix}charger control command: {Command} (register {RegisterValue}). {Reason}",
+            prefix, command, (ushort)command, reason);
+
+        if (!_dryRun)
+        {
+            await _client
+                .WriteSingleRegisterAsync(EvChargerRegisterMap.ControlCommand.Address, (ushort)command, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
     public async Task ResetAsync(string reason, CancellationToken cancellationToken = default)
     {
         // Mode and current are persistent settings, so reuse the normal change-detecting write path.
         var current = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         await ApplyAsync(current, ResetSettings, reason, cancellationToken).ConfigureAwait(false);
 
-        // The control command is an action rather than a stored setting, so it is always issued
-        // (there is nothing meaningful to compare it against).
-        var prefix = _dryRun ? "[DRY RUN] would send " : "sending ";
-        _logger.LogInformation(
-            "{Prefix}charger control command: {Command} (register {RegisterValue}). {Reason}",
-            prefix, EvChargerControlCommand.StopCharging, (ushort)EvChargerControlCommand.StopCharging, reason);
-
-        if (!_dryRun)
-        {
-            await _client
-                .WriteSingleRegisterAsync(
-                    EvChargerRegisterMap.ControlCommand.Address,
-                    (ushort)EvChargerControlCommand.StopCharging,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
+        await SendCommandAsync(EvChargerControlCommand.StopCharging, reason, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ushort> ReadRegisterAsync(RegisterDescriptor register, CancellationToken cancellationToken)

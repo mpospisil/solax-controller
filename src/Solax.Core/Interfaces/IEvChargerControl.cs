@@ -24,6 +24,16 @@ public interface IEvChargerControl
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sends a one-shot control command (e.g. <see cref="Enums.EvChargerControlCommand.StartCharging"/>)
+    /// to the charger. Commands are actions rather than stored settings, so they are always written
+    /// (there is nothing to compare against) — send them only on a real transition.
+    /// </summary>
+    Task SendCommandAsync(
+        Enums.EvChargerControlCommand command,
+        string reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the charger to a known safe idle state when we release control: use-mode
     /// <see cref="Enums.EvChargerMode.Stop"/>, the minimum 6 A current setpoint, and a
     /// <see cref="Enums.EvChargerControlCommand.StopCharging"/> command. The mode and current are

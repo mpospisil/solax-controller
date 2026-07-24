@@ -38,13 +38,13 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task Disconnect_ResetsChargerAndReleasesControl()
+    public async Task PauseDecision_ResetsChargerAndReleasesControl()
     {
         _charger.CurrentSettings = Original;
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
         await Cycle(EvChargerStatus.Charging); // takes control
 
-        _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
+        _controller.NextDecision = new(ChargingControlAction.Pause, null, "no surplus");
         await Cycle(EvChargerStatus.Available); // reset
 
         Assert.Equal(1, _charger.ResetCount);
@@ -91,9 +91,24 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task RestoreDecision_WithoutControl_WritesNothing()
+    public async Task StartChargingCommand_IsSentOnceOnTheTransitionIntoCharging()
     {
-        _controller.NextDecision = new(ChargingControlAction.Restore, null, "spurious");
+        _charger.CurrentSettings = Original;
+        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
+
+        await Cycle(EvChargerStatus.Available); // idle -> charging: must start the session
+        Assert.Equal([EvChargerControlCommand.StartCharging], _charger.Commands);
+
+        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 16), "more sun");
+        await Cycle(EvChargerStatus.Charging); // already charging: no repeat start command
+
+        Assert.Equal([EvChargerControlCommand.StartCharging], _charger.Commands);
+    }
+
+    [Fact]
+    public async Task PauseDecision_WithoutControl_WritesNothing()
+    {
+        _controller.NextDecision = new(ChargingControlAction.Pause, null, "spurious");
 
         await Cycle(EvChargerStatus.Available);
 

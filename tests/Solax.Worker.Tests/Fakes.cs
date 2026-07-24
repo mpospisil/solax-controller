@@ -28,9 +28,19 @@ internal sealed class FakeEvChargerControl : IEvChargerControl
         return Task.FromResult(target);
     }
 
+    /// <summary>Commands sent via <see cref="SendCommandAsync"/>, in order.</summary>
+    public List<EvChargerControlCommand> Commands { get; } = [];
+
+    public Task SendCommandAsync(EvChargerControlCommand command, string reason, CancellationToken cancellationToken = default)
+    {
+        Commands.Add(command);
+        return Task.CompletedTask;
+    }
+
     public Task ResetAsync(string reason, CancellationToken cancellationToken = default)
     {
         ResetCount++;
+        Commands.Add(EvChargerControlCommand.StopCharging);
         CurrentSettings = new EvChargerSettings(EvChargerMode.Stop, 6);
         return Task.CompletedTask;
     }

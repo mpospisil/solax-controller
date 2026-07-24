@@ -50,13 +50,12 @@ public sealed class ChargingControlCoordinator
                 case ChargingControlAction.None:
                     break;
 
-                case ChargingControlAction.Restore:
-                    await RestoreAsync(cancellationToken).ConfigureAwait(false);
+                case ChargingControlAction.Charge:
+                    await ChargeAsync(current, decision, cancellationToken).ConfigureAwait(false);
                     break;
 
-                case ChargingControlAction.Charge:
                 case ChargingControlAction.Pause:
-                    await ApplyTakingControlAsync(current, decision, cancellationToken).ConfigureAwait(false);
+                    await ResetToIdleAsync(decision.Reason, cancellationToken).ConfigureAwait(false);
                     break;
             }
         }
@@ -84,7 +83,7 @@ public sealed class ChargingControlCoordinator
 
         try
         {
-            await ResetAsync("Service stopping; resetting charger to idle.", cancellationToken).ConfigureAwait(false);
+            await ResetToIdleAsync("Service stopping.", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -92,35 +91,44 @@ public sealed class ChargingControlCoordinator
         }
     }
 
-    private async Task ApplyTakingControlAsync(
+    private async Task ChargeAsync(
         EvChargerSettings current,
         ChargingControlDecision decision,
         CancellationToken cancellationToken)
     {
-        _hasControl = true;
+        var starting = !_hasControl;
 
         // ApplyAsync writes only the fields that differ and logs each change.
         await _chargerControl
             .ApplyAsync(current, decision.TargetSettings!, decision.Reason, cancellationToken)
             .ConfigureAwait(false);
+
+        // The charger may be sitting idle/stopped (e.g. after our own reset), so a mode change alone
+        // won't necessarily begin a session -- issue the start command, but only on the transition so
+        // we don't re-send it every poll while charging.
+        if (starting)
+        {
+            await _chargerControl
+                .SendCommandAsync(EvChargerControlCommand.StartCharging, decision.Reason, cancellationToken)
+                .ConfigureAwait(false);
+            _hasControl = true;
+            _logger.LogInformation("Took charge control; started charging from live solar surplus.");
+        }
     }
 
-    private async Task RestoreAsync(CancellationToken cancellationToken)
+    private async Task ResetToIdleAsync(string reason, CancellationToken cancellationToken)
     {
         if (!_hasControl)
         {
             return;
         }
 
-        await ResetAsync("Car disconnected; resetting charger to idle.", cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task ResetAsync(string reason, CancellationToken cancellationToken)
-    {
         await _chargerControl.ResetAsync(reason, cancellationToken).ConfigureAwait(false);
 
         // Only released once the reset writes succeeded, so a failed reset is retried next cycle.
         _hasControl = false;
-        _logger.LogInformation("Released charge control; charger reset to Stop at {Amps}A with a stop-charging command.", 6);
+        _logger.LogInformation(
+            "Released charge control; charger reset to Stop at {Amps}A with a stop-charging command.",
+            EvChargerLimits.MinCurrentAmps);
     }
 }

@@ -13,9 +13,6 @@ public enum ChargingControlAction
     /// <summary>Charge: apply the decision's target settings (fast mode at the target current).</summary>
     Charge,
 
-    /// <summary>Pause charging while keeping control (the car is still connected).</summary>
+    /// <summary>Stop charging and reset the charger to its idle state, releasing control.</summary>
     Pause,
-
-    /// <summary>The car is disconnected — restore the backed-up original settings and release control.</summary>
-    Restore,
 }
