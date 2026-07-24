@@ -23,16 +23,23 @@ builder.Services.AddSerilog(config => config
 
 builder.Services.Configure<SolaxOptions>(builder.Configuration.GetSection(SolaxOptions.SectionName));
 
+// Enforces the dry-run guarantee structurally: in dry-run the device clients physically cannot
+// write, so even a caller that forgot its own guard can never reach the hardware.
+static IModbusClient WriteProofInDryRun(IServiceProvider services, IModbusClient client) =>
+    services.GetRequiredService<IOptions<ChargeControlOptions>>().Value.DryRun
+        ? new ReadOnlyModbusClient(client, services.GetRequiredService<ILogger<ReadOnlyModbusClient>>())
+        : client;
+
 builder.Services.AddKeyedSingleton<IModbusClient>(ModbusClientKeys.Inverter, (services, _) =>
 {
     var options = services.GetRequiredService<IOptions<SolaxOptions>>().Value;
-    return new ModbusTcpClient(options.Inverter);
+    return WriteProofInDryRun(services, new ModbusTcpClient(options.Inverter));
 });
 
 builder.Services.AddKeyedSingleton<IModbusClient>(ModbusClientKeys.EvCharger, (services, _) =>
 {
     var options = services.GetRequiredService<IOptions<SolaxOptions>>().Value;
-    return new ModbusTcpClient(options.EvCharger);
+    return WriteProofInDryRun(services, new ModbusTcpClient(options.EvCharger));
 });
 
 builder.Services.AddSingleton<IEnergyStateReader, EnergyStateReader>();
