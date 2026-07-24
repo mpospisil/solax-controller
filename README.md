@@ -146,11 +146,33 @@ When enabled, the worker drives the EV charger from **live solar surplus**, and 
 
 The current setpoint is always constrained to what the hardware accepts (**6–32 A**): the configured min/max are clamped into that range up-front, so the controller can never even target an illegal value, and the write path clamps again as a final guard.
 
+#### Smoothing: moving average and hysteresis
+
+Raw solar generation is erratic, so the controller never reacts to instantaneous data. Two buffering strategies keep it stable:
+
+**1. The 3-minute moving average.** Every poll, the surplus (`PV − Load`) is pushed into a rolling time window and the *average* drives every decision. A single 15-second dark cloud therefore can't interrupt a 3-hour charging session — only a sustained drop moves the average enough to matter. The window is `SurplusAverageWindow` (default `00:03:00`); samples older than it are evicted each poll.
+
+**2. The 1-amp hysteresis threshold.** A Modbus write is only issued when the new target differs from the charger's active setpoint by at least `CurrentChangeThresholdAmps` (default 1 A ≈ 230 W per phase). If the car is charging at 10 A, no command is sent until the average calls for 11 A or 9 A. Raise the threshold to damp the charger further (e.g. 3 A means 10 A → 12 A is ignored, 10 A → 13 A is written).
+
+These stack with the existing state hysteresis — the asymmetric start/stop thresholds on both the surplus and the battery SOC gate — so the charger is never nudged by noise.
+
+You can watch all of it in the log; each control cycle prints the raw surplus, the average, the sample count, the charger's active setpoint, and the target:
+
+```
+Charge control: Surplus=4180W Avg=3990W (12 samples) Setpoint=16A Target=17A Action=Charge. ...
+```
+
+and the telemetry line now carries the charger's active current:
+
+```
+SOC=96% ... EvCharger=Charging EvMode=Fast EvCurrent=16A EvPower=3680W
+```
+
 #### The 6 A hard cutoff — why the controller must explicitly stop
 
 This project bypasses the charger's native surplus modes: it runs its own Modbus loop and sets the exact current from its own `Surplus = PV − Load` calculation. That makes one rule critical.
 
-An EV will not accept a 2 A or 4 A charge — **6 A is the floor** (IEC 61851). So the logic engine has a hard cutoff:
+An EV will not accept a 2 A or 4 A charge — **6 A is the floor** (IEC 61851). So the logic engine has a hard cutoff (applied to the *averaged* surplus):
 
 - **Surplus ≥ 6 A** → write the charger's amperage to match the surplus.
 - **Surplus < 6 A** → **explicitly send a Stop/Pause command.**
@@ -183,6 +205,8 @@ A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages 
   "MinChargingCurrentAmps": 6,
   "MaxChargingCurrentAmps": 20, // setpoint is clamped to this
   "CurrentStepAmps": 1,         // whole-amp granularity the charger accepts
+  "SurplusAverageWindow": "00:03:00",  // rolling window the surplus is averaged over
+  "CurrentChangeThresholdAmps": 1,     // min amp change before re-commanding the charger
   "ResumeHysteresisWatts": 200, // extra surplus needed to (re)start, to avoid flapping
   "BatteryFullSocPercent": 95,  // SOC at/above which charging engages
   "BatteryReleaseSocPercent": 90 // SOC it must fall below to disengage

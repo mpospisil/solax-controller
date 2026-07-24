@@ -87,7 +87,11 @@ builder.Services.AddSingleton<IEvChargerControl>(services =>
     var client = services.GetRequiredKeyedService<IModbusClient>(ModbusClientKeys.EvCharger);
     var logger = services.GetRequiredService<ILogger<EvChargerControl>>();
     var options = services.GetRequiredService<IOptions<ChargeControlOptions>>().Value;
-    return new EvChargerControl(client, logger, dryRun: options.DryRun);
+    return new EvChargerControl(
+        client,
+        logger,
+        dryRun: options.DryRun,
+        currentChangeThresholdAmps: options.CurrentChangeThresholdAmps);
 });
 
 builder.Services.AddSingleton<IChargingController>(services =>
@@ -102,6 +106,9 @@ builder.Services.AddSingleton<IChargingController>(services =>
         options.BatteryFullSocPercent,
         options.BatteryReleaseSocPercent);
 });
+
+builder.Services.AddSingleton(services =>
+    new SurplusMovingAverage(services.GetRequiredService<IOptions<ChargeControlOptions>>().Value.SurplusAverageWindow));
 
 builder.Services.AddSingleton<ChargingControlCoordinator>();
 

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Solax.Core.Enums;
 using Solax.Core.Models;
+using Solax.Core.Strategies;
 
 namespace Solax.Worker.Tests;
 
@@ -15,7 +16,11 @@ public class ChargingControlCoordinatorTests
 
     public ChargingControlCoordinatorTests()
     {
-        _coordinator = new ChargingControlCoordinator(_controller, _charger, NullLogger<ChargingControlCoordinator>.Instance);
+        _coordinator = new ChargingControlCoordinator(
+            _controller,
+            _charger,
+            new SurplusMovingAverage(TimeSpan.FromMinutes(3)),
+            NullLogger<ChargingControlCoordinator>.Instance);
     }
 
     private static EnergyState State(EvChargerStatus status) =>

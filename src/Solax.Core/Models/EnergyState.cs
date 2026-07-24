@@ -13,7 +13,10 @@ public sealed record EnergyState(
     // The charger's work/use mode (Fast/ECO/Green/Stop), or null when it couldn't be read (the
     // holding register isn't available on every charger/firmware). Doesn't come from the inverter
     // telemetry block, so it's attached after FromRawRegisters rather than being a raw parameter.
-    EvChargerMode? ChargeMode = null)
+    EvChargerMode? ChargeMode = null,
+    // The charger's active current setpoint in amps, or null when it couldn't be read. Same story as
+    // ChargeMode: a control holding register, attached after FromRawRegisters.
+    int? ChargeCurrentAmps = null)
 {
     /// <summary>
     /// Current solar production minus what's currently going into charging (EV + battery).
@@ -32,6 +35,13 @@ public sealed record EnergyState(
     /// </summary>
     public double OtherLoadsPowerWatts =>
         SolarPowerWatts + GridPowerWatts - EvChargerPowerWatts - BatteryPowerWatts;
+
+    /// <summary>
+    /// Solar power available to the EV right now: production minus the household's Other Loads.
+    /// Reduces to <c>EV + Battery - Grid</c>, i.e. what the car already draws plus what is currently
+    /// being exported — the power that could go to the car without importing from the grid.
+    /// </summary>
+    public double SolarSurplusPowerWatts => SolarPowerWatts - OtherLoadsPowerWatts;
 
     // Per the SolaX Gen4 protocol: the battery power register is signed 16-bit with
     // positive = charging (negative = discharging). The per-phase grid/feed-in registers are

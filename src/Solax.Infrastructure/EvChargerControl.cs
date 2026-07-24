@@ -28,6 +28,7 @@ public sealed class EvChargerControl : IEvChargerControl
     private readonly IModbusClient _client;
     private readonly ILogger<EvChargerControl> _logger;
     private readonly bool _dryRun;
+    private readonly int _currentChangeThresholdAmps;
 
     // Dry-run only: the settings the charger "would" now have, so reads reflect prior simulated
     // writes and change-detection behaves like a real run instead of re-logging every poll.
@@ -39,11 +40,13 @@ public sealed class EvChargerControl : IEvChargerControl
     public EvChargerControl(
         [FromKeyedServices(ModbusClientKeys.EvCharger)] IModbusClient client,
         ILogger<EvChargerControl> logger,
-        bool dryRun = false)
+        bool dryRun = false,
+        int currentChangeThresholdAmps = 1)
     {
         _client = client;
         _logger = logger;
         _dryRun = dryRun;
+        _currentChangeThresholdAmps = Math.Max(1, currentChangeThresholdAmps);
     }
 
     public async Task<EvChargerSettings> ReadSettingsAsync(CancellationToken cancellationToken = default)
@@ -90,7 +93,9 @@ public sealed class EvChargerControl : IEvChargerControl
             }
         }
 
-        if (current.ChargeCurrentAmps != target.ChargeCurrentAmps)
+        // Hysteresis on the setpoint: only re-command the charger once the target has moved by at
+        // least the threshold (1A by default), so it isn't nudged on every small fluctuation.
+        if (Math.Abs(target.ChargeCurrentAmps - current.ChargeCurrentAmps) >= _currentChangeThresholdAmps)
         {
             // Clamp to the hardware's accepted range, then encode with the 0.01A register scale.
             var clampedAmps = Math.Clamp(target.ChargeCurrentAmps, EvChargerLimits.MinCurrentAmps, EvChargerLimits.MaxCurrentAmps);

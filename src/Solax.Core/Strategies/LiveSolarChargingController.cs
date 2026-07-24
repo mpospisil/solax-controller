@@ -95,7 +95,8 @@ public sealed class LiveSolarChargingController : IChargingController
             return Idle(input, $"Battery {soc:F0}% below {threshold:F0}% full-battery gate.");
         }
 
-        var availableWatts = input.State.SolarPowerWatts - input.State.OtherLoadsPowerWatts;
+        // The smoothed (moving-average) surplus, so a passing cloud doesn't interrupt the session.
+        var availableWatts = input.SurplusWatts;
         var minWatts = _power.AmpsToWatts(_minChargingCurrentAmps);
 
         // Asymmetric threshold: keep charging down to the minimum, but only (re)start once we're a

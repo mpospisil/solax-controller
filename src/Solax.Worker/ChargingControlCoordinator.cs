@@ -1,6 +1,7 @@
 using Solax.Core.Enums;
 using Solax.Core.Interfaces;
 using Solax.Core.Models;
+using Solax.Core.Strategies;
 
 namespace Solax.Worker;
 
@@ -17,6 +18,7 @@ public sealed class ChargingControlCoordinator
 {
     private readonly IChargingController _controller;
     private readonly IEvChargerControl _chargerControl;
+    private readonly SurplusMovingAverage _surplusAverage;
     private readonly ILogger<ChargingControlCoordinator> _logger;
 
     // True once we've overridden the charger, until it has been reset back to the idle state.
@@ -25,10 +27,12 @@ public sealed class ChargingControlCoordinator
     public ChargingControlCoordinator(
         IChargingController controller,
         IEvChargerControl chargerControl,
+        SurplusMovingAverage surplusAverage,
         ILogger<ChargingControlCoordinator> logger)
     {
         _controller = controller;
         _chargerControl = chargerControl;
+        _surplusAverage = surplusAverage;
         _logger = logger;
     }
 
@@ -38,12 +42,28 @@ public sealed class ChargingControlCoordinator
         {
             var current = await _chargerControl.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
 
+            // Decide on the smoothed surplus, not the instantaneous value, so a passing cloud can't
+            // interrupt a long charging session.
+            var rawSurplus = state.SolarSurplusPowerWatts;
+            var averagedSurplus = _surplusAverage.Add(state.Timestamp, rawSurplus);
+
             var input = new ChargingControlInput(
                 state,
+                SurplusWatts: averagedSurplus,
                 CurrentSettings: current,
                 HasControl: _hasControl);
 
             var decision = _controller.Decide(input);
+
+            _logger.LogInformation(
+                "Charge control: Surplus={RawSurplusWatts:F0}W Avg={AveragedSurplusWatts:F0}W ({SampleCount} samples) Setpoint={SetpointAmps}A Target={TargetAmps} Action={Action}. {Reason}",
+                rawSurplus,
+                averagedSurplus,
+                _surplusAverage.Count,
+                current.ChargeCurrentAmps,
+                decision.TargetSettings is null ? "n/a" : $"{decision.TargetSettings.ChargeCurrentAmps}A",
+                decision.Action,
+                decision.Reason);
 
             switch (decision.Action)
             {
