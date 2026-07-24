@@ -142,7 +142,9 @@ If the API key or resource id is missing, the worker logs a warning and skips fo
 
 ### EV charge control (writes to the charger)
 
-When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), pauses when it falls below the minimum viable current, and restores the charger's original settings when the car is unplugged. It writes only values that differ from what's already on the device and logs every change.
+When enabled, the worker drives the EV charger from **live solar surplus**, and only once the home battery is essentially full. While a car is connected and the battery is full, it fast-charges on the available surplus (`actualSolar − OtherLoads`), and pauses when it falls below the minimum viable current. It writes only values that differ from what's already on the device and logs every change.
+
+When it releases control — the car is unplugged, or the service shuts down — the charger is **reset to a known idle state**: use-mode `Stop`, current setpoint `6 A`, plus a `Stop Charging` control command (register `0x627`). Mode and current are written only if they differ; the stop command is always issued, since it's an action rather than a stored setting.
 
 A **battery-SOC gate** with hysteresis fronts the whole thing: charging engages only at/above `BatteryFullSocPercent` (so the car never competes with charging the home battery) and, once charging, keeps going until SOC falls below `BatteryReleaseSocPercent` — the band stops the car's own draw from flapping the gate.
 

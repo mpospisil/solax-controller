@@ -19,6 +19,9 @@ public sealed class ChargingControlCoordinator
     private readonly IEvChargerControl _chargerControl;
     private readonly ILogger<ChargingControlCoordinator> _logger;
 
+    // True once we've overridden the charger, until it has been reset back to the idle state.
+    private bool _hasControl;
+
     public ChargingControlCoordinator(
         IChargingController controller,
         IEvChargerControl chargerControl,
@@ -38,7 +41,7 @@ public sealed class ChargingControlCoordinator
             var input = new ChargingControlInput(
                 state,
                 CurrentSettings: current,
-                HasControl: _chargerControl.HasOriginal);
+                HasControl: _hasControl);
 
             var decision = _controller.Decide(input);
 
@@ -68,24 +71,24 @@ public sealed class ChargingControlCoordinator
     }
 
     /// <summary>
-    /// Puts the charger back to the owner's original settings when the service is shutting down, so we
-    /// never leave our override behind. Safe to call when we don't hold control (it's a no-op), and
-    /// failures are logged rather than blocking shutdown.
+    /// Resets the charger to the idle state when the service is shutting down, so we never leave our
+    /// override behind. No-op when we don't hold control, and failures are logged rather than blocking
+    /// shutdown.
     /// </summary>
-    public async Task RestoreOnShutdownAsync(CancellationToken cancellationToken)
+    public async Task ResetOnShutdownAsync(CancellationToken cancellationToken)
     {
+        if (!_hasControl)
+        {
+            return;
+        }
+
         try
         {
-            if (await _chargerControl
-                    .RestoreOriginalAsync("Service stopping; restoring original charger settings.", cancellationToken)
-                    .ConfigureAwait(false))
-            {
-                _logger.LogInformation("Released charge control on shutdown; original charger settings restored.");
-            }
+            await ResetAsync("Service stopping; resetting charger to idle.", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to restore original charger settings on shutdown; the charger may still hold our override.");
+            _logger.LogWarning(ex, "Failed to reset the charger on shutdown; it may still hold our override.");
         }
     }
 
@@ -94,9 +97,7 @@ public sealed class ChargingControlCoordinator
         ChargingControlDecision decision,
         CancellationToken cancellationToken)
     {
-        // Snapshot the owner's original settings before the first override (no-op afterwards), so
-        // every value we change can be put back exactly on disconnect.
-        await _chargerControl.CaptureOriginalAsync(cancellationToken).ConfigureAwait(false);
+        _hasControl = true;
 
         // ApplyAsync writes only the fields that differ and logs each change.
         await _chargerControl
@@ -106,13 +107,20 @@ public sealed class ChargingControlCoordinator
 
     private async Task RestoreAsync(CancellationToken cancellationToken)
     {
-        var restored = await _chargerControl
-            .RestoreOriginalAsync("Car disconnected; restoring original charger settings.", cancellationToken)
-            .ConfigureAwait(false);
-
-        if (restored)
+        if (!_hasControl)
         {
-            _logger.LogInformation("Released charge control; original charger settings restored.");
+            return;
         }
+
+        await ResetAsync("Car disconnected; resetting charger to idle.", cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ResetAsync(string reason, CancellationToken cancellationToken)
+    {
+        await _chargerControl.ResetAsync(reason, cancellationToken).ConfigureAwait(false);
+
+        // Only released once the reset writes succeeded, so a failed reset is retried next cycle.
+        _hasControl = false;
+        _logger.LogInformation("Released charge control; charger reset to Stop at {Amps}A with a stop-charging command.", 6);
     }
 }

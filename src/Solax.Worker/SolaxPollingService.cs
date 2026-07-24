@@ -36,13 +36,13 @@ public sealed class SolaxPollingService : BackgroundService
         _pollInterval = TimeSpan.FromSeconds(options.Value.PollIntervalSeconds);
     }
 
-    // Shutdown runs with a fresh token (ExecuteAsync's is already cancelled), so the restore write can
+    // Shutdown runs with a fresh token (ExecuteAsync's is already cancelled), so the reset write can
     // still reach the charger. Without this we'd leave our override on the device after stopping.
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         if (_chargeControlEnabled)
         {
-            await _chargingControl.RestoreOnShutdownAsync(cancellationToken);
+            await _chargingControl.ResetOnShutdownAsync(cancellationToken);
         }
 
         await base.StopAsync(cancellationToken);

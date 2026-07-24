@@ -38,38 +38,46 @@ public class ChargingControlCoordinatorTests
     }
 
     [Fact]
-    public async Task Disconnect_RestoresBackedUpOriginalAndReleasesControl()
+    public async Task Disconnect_ResetsChargerAndReleasesControl()
     {
         _charger.CurrentSettings = Original;
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
-        await Cycle(EvChargerStatus.Charging); // takes control, backs up Original
+        await Cycle(EvChargerStatus.Charging); // takes control
 
         _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
-        await Cycle(EvChargerStatus.Available); // restore
+        await Cycle(EvChargerStatus.Available); // reset
 
-        Assert.Equal(Original, _charger.Restored); // every original value put back
-        Assert.False(_charger.HasOriginal); // control released
+        Assert.Equal(1, _charger.ResetCount);
 
-        // A further restore does nothing.
+        // Control released: a further reset decision is a no-op.
         await Cycle(EvChargerStatus.Available);
-        Assert.Single(_charger.Applied); // only the original charge write, no extra writes
+        Assert.Equal(1, _charger.ResetCount);
     }
 
     [Fact]
-    public async Task Backup_IsCapturedOnce_AndSurvivesSetpointChanges()
+    public async Task HasControl_IsReportedToTheControllerOnceHeld()
     {
         _charger.CurrentSettings = Original;
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
-        await Cycle(EvChargerStatus.Charging); // backs up Original, applies Fast/10 (now current)
+        await Cycle(EvChargerStatus.Charging);
 
         _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 16), "more sun");
-        await Cycle(EvChargerStatus.Charging); // must NOT re-backup Fast/10
+        await Cycle(EvChargerStatus.Charging);
+
         Assert.True(_controller.LastInput!.HasControl);
+    }
 
-        _controller.NextDecision = new(ChargingControlAction.Restore, null, "disconnect");
-        await Cycle(EvChargerStatus.Available);
+    [Fact]
+    public async Task ResetOnShutdown_ResetsOnlyWhenControlIsHeld()
+    {
+        await _coordinator.ResetOnShutdownAsync(CancellationToken.None);
+        Assert.Equal(0, _charger.ResetCount); // never took control
 
-        Assert.Equal(Original, _charger.Restored); // still the very first original, not Fast/10
+        _controller.NextDecision = new(ChargingControlAction.Charge, new EvChargerSettings(EvChargerMode.Fast, 10), "charge");
+        await Cycle(EvChargerStatus.Charging);
+
+        await _coordinator.ResetOnShutdownAsync(CancellationToken.None);
+        Assert.Equal(1, _charger.ResetCount);
     }
 
     [Fact]
@@ -90,5 +98,6 @@ public class ChargingControlCoordinatorTests
         await Cycle(EvChargerStatus.Available);
 
         Assert.Empty(_charger.Applied);
+        Assert.Equal(0, _charger.ResetCount);
     }
 }
